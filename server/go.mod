@@ -28,6 +28,7 @@ require (
 	github.com/olekukonko/errors v1.1.0 // indirect
 	github.com/olekukonko/ll v0.0.9 // indirect
 	github.com/olekukonko/tablewriter v1.1.0 // indirect
+	github.com/pion/opus v0.0.0-20260424161754-db0d87056dc1 // indirect
 	github.com/remyoudompheng/bigfft v0.0.0-20230129092748-24d4a6f8daec // indirect
 	github.com/rivo/uniseg v0.2.0 // indirect
 	go.opentelemetry.io/auto/sdk v1.2.1 // indirect

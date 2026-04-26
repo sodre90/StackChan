@@ -11,6 +11,7 @@ import (
 	"net"
 	"net/http"
 	"path/filepath"
+	"stackChan/internal/ai"
 	"stackChan/internal/controller/dance"
 	"stackChan/internal/controller/device"
 	"stackChan/internal/controller/file"
@@ -69,6 +70,72 @@ var (
 				group.Middleware(ghttp.MiddlewareHandlerResponse)
 				group.Bind(device.NewV1(), friend.NewV1(), dance.NewV1(), file.NewV1(), post.NewV1())
 			})
+
+			// AI protocol handler for XiaoZhi voice interaction
+			aiConfig, err := ai.LoadConfig("")
+			if err != nil {
+				fmt.Printf("Warning: Could not load AI config, using defaults: %v\n", err)
+				aiConfig = ai.DefaultConfig()
+			}
+			ai.Initialize(aiConfig)
+			s.BindHandler("/xiaozhi/ws", ai.Handler)
+			port := aiConfig.WSPort
+			if port == 0 {
+				port = 12800
+			}
+
+			// OTA endpoint - returns WebSocket config to ESP32 devices
+			// The ESP32 firmware calls this URL to get the WebSocket server address
+			s.BindHandler("/xiaozhi/ota/", func(r *ghttp.Request) {
+				// Parse device info from headers
+				deviceID := r.Header.Get("Device-Id")
+				clientID := r.Header.Get("Client-Id")
+				activationVersion := r.Header.Get("Activation-Version")
+
+				// Build the OTA response JSON
+				// The ESP32 expects: { "firmware": {...}, "websocket": {...}, "server_time": {...} }
+				otaResponse := map[string]interface{}{
+					"firmware": map[string]interface{}{
+						"version": "1.0.0",
+						"url":     fmt.Sprintf("http://%s/xiaozhi/firmware.bin", r.Host),
+					},
+					"websocket": map[string]interface{}{
+						"url":     fmt.Sprintf("ws://%s/xiaozhi/ws", r.Host),
+						"version": 1,
+					},
+					"server_time": map[string]interface{}{
+						"timestamp":        time.Now().Unix(),
+						"timezone_offset":  0,
+					},
+				}
+
+				// Log the OTA request for debugging
+				fmt.Printf("[OTA] Request from device_id=%s, client_id=%s, activation=%s\n",
+					deviceID, clientID, activationVersion)
+
+				r.Response.WriteJson(otaResponse)
+			})
+
+			// Serve firmware binary at /xiaozhi/firmware.bin (placeholder)
+			s.Group("/xiaozhi", func(group *ghttp.RouterGroup) {
+				group.GET("/firmware.bin", func(r *ghttp.Request) {
+					r.Response.WriteHeader(http.StatusNotFound)
+					r.Response.Write("Firmware not found. Please build and flash firmware separately.")
+				})
+			})
+
+			fmt.Printf("AI protocol handler started at /xiaozhi/ws (port %d)\n", port)
+			fmt.Printf("OTA endpoint available at /xiaozhi/ota/\n")
+			fmt.Printf("AI Backend: %s (LLM: %s, ASR: %s, TTS: %s/%s)\n",
+				aiConfig.APIBaseURL, aiConfig.LLMModel, aiConfig.ASRModel,
+				aiConfig.TTSModel, aiConfig.TTSVoice)
+			if aiConfig.StreamLLM {
+				fmt.Println("LLM streaming: enabled")
+			}
+			if aiConfig.ContextMessages > 0 {
+				fmt.Printf("Conversation context: %d message pairs\n", aiConfig.ContextMessages)
+			}
+
 			s.Run()
 			return nil
 		},

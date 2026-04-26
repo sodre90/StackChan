@@ -1,15 +1,71 @@
-# https://goframe.org/docs/web/server-config-file-template
+# StackChan AI Configuration
+# For local models: Ollama (default), LM Studio, vLLM, or any OpenAI-compatible API
+
 server:
-  address:     ":12800"
-#  openapiPath: "/api.json"
-  swaggerPath: "/swagger"
+  address: ":12800"
 
-# https://goframe.org/docs/core/glog-config
-logger:
-  level : "all"
-  stdout: true
+ai:
+  # OpenAI-compatible API base URL
+  # Ollama:     http://localhost:11434/v1
+  # LM Studio:  http://localhost:1234/v1
+  # vLLM:       http://localhost:8000/v1
+  # OpenAI:     https://api.openai.com/v1
+  api_base_url: "http://localhost:11434/v1"
 
-# https://goframe.org/docs/core/gdb-config-file
-database:
-  default:
-    link: "sqlite::@file(/stackChan.sqlite)"
+  # API key (empty for local models like Ollama)
+  api_key: ""
+
+  # ASR (Speech-to-Text) model
+  # Ollama: whisper, whisper-large-v3
+  # OpenAI: whisper-1
+  asr_model: "whisper-large-v3"
+
+  # LLM model
+  # Ollama: qwen2.5, llama3, mistral, etc.
+  # OpenAI: gpt-4o-mini, gpt-4o, etc.
+  llm_model: "qwen2.5"
+
+  # TTS (Text-to-Speech) model
+  # OpenAI: tts-1, tts-1-hd
+  # For local TTS, use an OpenAI-compatible endpoint
+  tts_model: "tts-1"
+
+  # TTS voice (OpenAI voices: alloy, echo, fable, onyx, nova, shimmer)
+  tts_voice: "alloy"
+
+  # System prompt for the LLM
+  system_prompt: >
+    You are StackChan, a cute AI desktop robot built on M5Stack CoreS3.
+    You have a screen face with expressive eyes and a mouth.
+    Be friendly, helpful, and concise in your responses.
+    Keep responses short (under 100 words) since they are spoken aloud.
+    Use a warm, playful tone.
+
+  # Enable ASR (automatic speech recognition)
+  # If false, the device must send text directly in listen messages
+  enable_asr: true
+
+  # Enable TTS (text-to-speech)
+  # If false, only text responses are sent (no audio playback)
+  enable_tts: true
+
+  # TTS response format (mp3, opus, aac, flac, wav, pcm)
+  # opus is recommended for ESP32 playback
+  tts_response_format: "opus"
+
+  # Conversation context: number of recent message pairs to keep
+  # Set to 0 to disable context (stateless)
+  context_messages: 10
+
+  # LLM streaming: stream responses for lower latency
+  stream_llm: true
+
+  # Voice activity detection: silence timeout in ms before processing speech
+  vad_silence_timeout_ms: 1500
+
+  # WebSocket port for AI protocol (if different from main server port)
+  # Set to 0 to use the main server port
+  ws_port: 0
+
+  # Enable MCP tools for robot control (head movement, LED, reminders)
+  enable_mcp_tools: true
