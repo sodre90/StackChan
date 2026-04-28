@@ -27,19 +27,21 @@ ai:
 
   # TTS (Text-to-Speech) model
   # OpenAI: tts-1, tts-1-hd
-  # For local TTS, use an OpenAI-compatible endpoint
-  tts_model: "tts-1"
+  # For local TTS, use edge-tts (set to "edge-tts" and run tts_server.py)
+  tts_model: "edge-tts"
 
-  # TTS voice (OpenAI voices: alloy, echo, fable, onyx, nova, shimmer)
+  # TTS voice (edge-tts Hungarian voices: hu-HU-NoemiNeural, hu-HU-TamasNeural)
   tts_voice: "alloy"
 
   # System prompt for the LLM
+  # System prompt (in Hungarian for HU_HU locale)
   system_prompt: >
-    You are StackChan, a cute AI desktop robot built on M5Stack CoreS3.
-    You have a screen face with expressive eyes and a mouth.
-    Be friendly, helpful, and concise in your responses.
-    Keep responses short (under 100 words) since they are spoken aloud.
-    Use a warm, playful tone.
+    Te vagy a StackChan, egy aranyos AI asztali robot, amely az M5Stack CoreS3-ra épül.
+    Van egy képernyőd, amin kifejező szemek és száj látható.
+    Legyél barátságos, segítőkész és tömör a válaszaidban.
+    Tartsd röviden a válaszokat (100 szó alatt), mert hangosan hangosítod őket.
+    Használj meleg, játékos hangnemet.
+    Magyarul válaszolj!
 
   # Enable ASR (automatic speech recognition)
   # If false, the device must send text directly in listen messages

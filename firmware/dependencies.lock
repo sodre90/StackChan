@@ -16,15 +16,21 @@ dependencies:
       type: service
     version: 3.6.5
   78/esp-wifi-connect:
-    component_hash: e64ce09a795dd3b4883e1f68be10b0dd11260331f021a5f0b1f3bfd9a25d413b
+    component_hash: 33bf420fb12e443608ce8539e130a357bee82b050d7b3dccd4b5e14c792f6dbe
     dependencies:
+    - matches:
+      - if: idf_version >=6.0
+      name: espressif/cjson
+      registry_url: https://components.espressif.com
+      require: private
+      version: ^1.7.19
     - name: idf
       require: private
       version: '>=5.3'
     source:
       registry_url: https://components.espressif.com/
       type: service
-    version: 3.1.2
+    version: 3.1.3
   78/esp_lcd_nv3023:
     component_hash: fa88abfc19a312eb5e6f2ffa187e0a9faf67e01e758bfb979d3f9d92561a494f
     dependencies:
@@ -40,7 +46,7 @@ dependencies:
       type: service
     version: 1.0.0
   78/uart-eth-modem:
-    component_hash: 7a33284e4ba22f420191be8021cd4fe3e49f5e50eea1db70370b217a18147d8e
+    component_hash: c74557e75766f5dd7a265a7ed80c68d01a910940600886b416acd206a615b614
     dependencies:
     - name: 78/uart-uhci
       registry_url: https://components.espressif.com
@@ -56,7 +62,7 @@ dependencies:
     source:
       registry_url: https://components.espressif.com/
       type: service
-    version: 0.3.4
+    version: 0.3.5
   78/uart-uhci:
     component_hash: 200eb10923cb750dddbee5504a36d7b5eaac611afbf52fb9066dc7130159f696
     dependencies:
@@ -92,7 +98,7 @@ dependencies:
       type: service
     version: 0.2.1
   espressif/adc_mic:
-    component_hash: 3bb576d530564cb8e805fc34309d485de393f634651f3d31579fe3037b581d4f
+    component_hash: dd39c1142555f41ee06671355e91d6dc1fd9f1ef424f78f3dcfbafd8ac030df4
     dependencies:
     - name: espressif/cmake_utilities
       registry_url: https://components.espressif.com
@@ -101,14 +107,14 @@ dependencies:
     - name: espressif/esp_codec_dev
       registry_url: https://components.espressif.com
       require: private
-      version: ^1.3.*
+      version: '>=1.3.0,<1.5.5'
     - name: idf
       require: private
       version: '>=5.0'
     source:
       registry_url: https://components.espressif.com/
       type: service
-    version: 0.2.2
+    version: 0.2.3
   espressif/bmi270_sensor:
     component_hash: fac23a5ecd2effdac0fb0705988d853745b8ffb99a384f87a307b3b25d15d432
     dependencies:
@@ -141,6 +147,16 @@ dependencies:
       registry_url: https://components.espressif.com/
       type: service
     version: 4.1.6
+  espressif/cjson:
+    component_hash: e788323270d90738662d66fffa910bfe1fba019bba087f01557e70c40485b469
+    dependencies:
+    - name: idf
+      require: private
+      version: '>=5.0'
+    source:
+      registry_url: https://components.espressif.com
+      type: service
+    version: 1.7.19~2
   espressif/cmake_utilities:
     component_hash: 351350613ceafba240b761b4ea991e0f231ac7a9f59a9ee901f751bddc0bb18f
     dependencies:
@@ -190,7 +206,7 @@ dependencies:
       type: service
     version: 2.3.1
   espressif/esp32-camera:
-    component_hash: ac4228c825b891378bc0806869170d4ebc5d45ba8ebc519b4f8886a56ad2d123
+    component_hash: 2b75f6f0c987fb0e3687ccbd464cd00c163ea8cb05d2470cfb05adf6535bc488
     dependencies:
     - name: espressif/esp_jpeg
       registry_url: https://components.espressif.com
@@ -202,7 +218,7 @@ dependencies:
     source:
       registry_url: https://components.espressif.com/
       type: service
-    version: 2.1.5
+    version: 2.1.6
   espressif/esp_audio_codec:
     component_hash: af4663830bc73eca58febcc34a976d003465e78ed57458aa00a14b231e392ca1
     dependencies:
@@ -466,7 +482,7 @@ dependencies:
       type: service
     version: 1.2.1
   espressif/esp_lcd_touch_cst816s:
-    component_hash: 6b11c489952c121396d4eaf5804b45e3f1f8dcd2c548dc6f2cbedf68622b013d
+    component_hash: a562ca3238756cca575908ed2cc4da4bab95f3815180b4f01f4c949b658bdd6d
     dependencies:
     - name: espressif/esp_lcd_touch
       registry_url: https://components.espressif.com
@@ -474,11 +490,11 @@ dependencies:
       version: ^1.2.0
     - name: idf
       require: private
-      version: '>=4.4.2'
+      version: '>=5.2'
     source:
       registry_url: https://components.espressif.com/
       type: service
-    version: 1.1.1
+    version: 1.1.1~1
   espressif/esp_lcd_touch_ft5x06:
     component_hash: abaec05f46a793549b60afdda9eff86e3c8e87782c8c169007911232388d2858
     dependencies:
@@ -494,7 +510,7 @@ dependencies:
       type: service
     version: 1.0.7
   espressif/esp_lcd_touch_gt1151:
-    component_hash: acd0fb87e8b58dc90cebda8438ee31c068975c15c040a62723843ca0420d38b6
+    component_hash: 60ef8b9429fad6526607b7b423c3caa6728fd8eee182f67de7fefa87f9ec6754
     dependencies:
     - name: espressif/esp_lcd_touch
       registry_url: https://components.espressif.com
@@ -502,13 +518,13 @@ dependencies:
       version: ^1.2.0
     - name: idf
       require: private
-      version: '>=4.4.2'
+      version: '>=5.2'
     source:
       registry_url: https://components.espressif.com/
       type: service
-    version: 1.1.0
+    version: 1.1.0~1
   espressif/esp_lcd_touch_gt911:
-    component_hash: be02e243d18b9a661bc13b0d22c0a5cfa3f708cf04d6eb059772276c8c8a4d76
+    component_hash: 6029febef66eefd0910d527d7f30292779ccbf22a8dedd2bd69466acf0068a7b
     dependencies:
     - name: espressif/esp_lcd_touch
       registry_url: https://components.espressif.com
@@ -516,13 +532,13 @@ dependencies:
       version: ^1.2.0
     - name: idf
       require: private
-      version: '>=4.4.2'
+      version: '>=5.2'
     source:
       registry_url: https://components.espressif.com/
       type: service
-    version: 1.2.0~1
+    version: 1.2.0~2
   espressif/esp_lcd_touch_st7123:
-    component_hash: 717080a55368a5ca3e3704081a75ddab3e0b8884e335e73b7094beb8ae55f195
+    component_hash: c43fd76fb12b4dd1bf30d60e99e4ec150b16e17cafc942a58e6274d4b68e71fe
     dependencies:
     - name: espressif/cmake_utilities
       registry_url: https://components.espressif.com
@@ -538,7 +554,7 @@ dependencies:
     source:
       registry_url: https://components.espressif.com/
       type: service
-    version: 1.0.1
+    version: 1.0.2
   espressif/esp_lvgl_port:
     component_hash: b6360960f47b6776462e7092861b3ea66477ffb762a01baa0aecbb3d74cd50f4
     dependencies:
@@ -554,7 +570,7 @@ dependencies:
       type: service
     version: 2.7.2
   espressif/esp_mmap_assets:
-    component_hash: 91d785326b03db15e2f7f1314d8c976d38f21aa5759b570dcbbc89bcf247fd27
+    component_hash: b7c559238d9f4c11048b1d7302f5474e4f4f590902433efd792bd0cbf5324f2a
     dependencies:
     - name: espressif/cmake_utilities
       registry_url: https://components.espressif.com
@@ -566,7 +582,7 @@ dependencies:
     source:
       registry_url: https://components.espressif.com/
       type: service
-    version: 1.4.0
+    version: 2.0.0
   espressif/esp_new_jpeg:
     component_hash: e6af208a875abd0ecfc0213d3751a11b504b463ebde6930f24096047925fa5c1
     dependencies: []
@@ -739,6 +755,23 @@ dependencies:
       registry_url: https://components.espressif.com/
       type: service
     version: 3.0.3
+  espressif/usb:
+    component_hash: 4f00ced5663505a368bafcb9bb6b2e4a5033cc5625b8f510755a75baadf4ff1d
+    dependencies:
+    - name: idf
+      require: private
+      version: '>=5.4'
+    source:
+      registry_url: https://components.espressif.com
+      type: service
+    targets:
+    - esp32s2
+    - esp32s3
+    - esp32s31
+    - esp32p4
+    - esp32h4
+    - linux
+    version: 1.4.0
   espressif/usb_host_uvc:
     component_hash: b0cb9a3a2eaa09dc6e5cc3e47e04d0a73e47c2d3dcfb3afce959224a1fe5fb5e
     dependencies:
@@ -788,12 +821,12 @@ dependencies:
       type: service
     version: 9.4.0
   tny-robotics/sh1106-esp-idf:
-    component_hash: 7be190d7c58cd635adf8b74b3a841f8245f2f82f36d135a64d8e53cfab39124d
+    component_hash: b7a0cd10a16a249142b400014ad41716fb5420b4b55e08b9693e5911d9949a49
     dependencies: []
     source:
       registry_url: https://components.espressif.com/
       type: service
-    version: 1.0.0
+    version: 1.0.1
   txp666/otto-emoji-gif-component:
     component_hash: 8da812ae44707af319a20e164e8b544199fe401436167c206e684594e0a38c5d
     dependencies:

@@ -14,8 +14,16 @@ import (
 
 // Config holds the AI backend configuration for local OpenAI-compatible models
 type Config struct {
-	// OpenAI-compatible API base URL (e.g., http://localhost:11434/v1 for Ollama)
+	// OpenAI-compatible API base URL for LLM/TTS (e.g., http://localhost:11434/v1 for Ollama)
 	APIBaseURL string `yaml:"api_base_url" json:"api_base_url"`
+
+	// OpenAI-compatible API base URL for ASR (e.g., http://localhost:13000/v1 for Whisper server)
+	// If empty, falls back to APIBaseURL
+	ASRBaseURL string `yaml:"asr_base_url" json:"asr_base_url"`
+
+	// OpenAI-compatible API base URL for TTS (e.g., http://localhost:14000/v1 for local TTS server)
+	// If empty, falls back to APIBaseURL
+	TTSBaseURL string `yaml:"tts_base_url" json:"tts_base_url"`
 
 	// API key (may be empty for local models)
 	APIKey string `yaml:"api_key" json:"api_key"`
@@ -59,14 +67,19 @@ type Config struct {
 
 	// Enable MCP tools for robot control
 	EnableMCPTools bool `yaml:"enable_mcp_tools" json:"enable_mcp_tools"`
+
+	// ASR language hint (e.g., "hu", "en", "auto"). Empty means auto-detect.
+	ASRLanguage string `yaml:"asr_language" json:"asr_language"`
 }
 
 // DefaultConfig returns the default AI configuration for local Ollama setup
 func DefaultConfig() Config {
 	return Config{
 		APIBaseURL:          "http://localhost:11434/v1",
+		ASRBaseURL:          "http://localhost:13000/v1",
+		TTSBaseURL:          "http://localhost:14000/v1",
 		APIKey:              "",
-		ASRModel:            "whisper-large-v3",
+		ASRModel:            "whisper",
 		LLMModel:            "qwen2.5",
 		TTSModel:            "tts-1",
 		TTSVoice:            "alloy",

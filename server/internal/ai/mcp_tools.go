@@ -10,6 +10,8 @@ import (
 	"encoding/binary"
 	"encoding/json"
 	"fmt"
+	"io"
+	"net/http"
 	"strings"
 	"sync"
 	"time"
@@ -161,6 +163,29 @@ func NewMCPManager() *MCPManager {
 		Handler: m.handlePlayDance,
 	})
 
+	m.RegisterTool(MCPTool{
+		Name:        "get_weather",
+		Description: "Get current weather conditions and 3-day forecast for a location. Always call this for any weather or temperature question — never answer from memory.",
+		Parameters: map[string]interface{}{
+			"type": "object",
+			"properties": map[string]interface{}{
+				"location": map[string]interface{}{"type": "string", "description": "City name or location (e.g. Budapest, London, New York)"},
+			},
+			"required": []string{"location"},
+		},
+		Handler: m.handleGetWeather,
+	})
+
+	m.RegisterTool(MCPTool{
+		Name:        "get_current_datetime",
+		Description: "Get the current date and time. Use this when the user asks what time or date it is.",
+		Parameters: map[string]interface{}{
+			"type":       "object",
+			"properties": map[string]interface{}{},
+		},
+		Handler: m.handleGetCurrentDatetime,
+	})
+
 	return m
 }
 
@@ -185,6 +210,25 @@ func (m *MCPManager) GetTools() []map[string]interface{} {
 		})
 	}
 	return tools
+}
+
+// GetToolDefinitions returns tools in OpenAI function-calling format
+func (m *MCPManager) GetToolDefinitions() []map[string]interface{} {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+
+	defs := make([]map[string]interface{}, 0, len(m.tools))
+	for _, tool := range m.tools {
+		defs = append(defs, map[string]interface{}{
+			"type": "function",
+			"function": map[string]interface{}{
+				"name":        tool.Name,
+				"description": tool.Description,
+				"parameters":  tool.Parameters,
+			},
+		})
+	}
+	return defs
 }
 
 // RegisterDevice registers a device state for MCP tool integration
@@ -586,6 +630,83 @@ func (m *MCPManager) handlePlayDance(ctx context.Context, client *AIClient, args
 	}
 
 	return fmt.Sprintf("Dance '%s' playing", dance), nil
+}
+
+// handleGetWeather fetches current weather + 3-day forecast from wttr.in
+func (m *MCPManager) handleGetWeather(ctx context.Context, client *AIClient, args map[string]interface{}) (string, error) {
+	location, _ := args["location"].(string)
+	if location == "" {
+		location = "Budapest"
+	}
+
+	loc := strings.ReplaceAll(location, " ", "+")
+	urlStr := fmt.Sprintf("https://wttr.in/%s?format=j1", loc)
+
+	req, err := http.NewRequestWithContext(ctx, "GET", urlStr, nil)
+	if err != nil {
+		return "", fmt.Errorf("build request: %w", err)
+	}
+	req.Header.Set("User-Agent", "curl/7.79.1")
+
+	httpClient := &http.Client{Timeout: 10 * time.Second}
+	resp, err := httpClient.Do(req)
+	if err != nil {
+		return "", fmt.Errorf("weather fetch failed: %w", err)
+	}
+	defer resp.Body.Close()
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return "", fmt.Errorf("read response: %w", err)
+	}
+
+	var data map[string]interface{}
+	if err := json.Unmarshal(body, &data); err != nil {
+		return "", fmt.Errorf("parse weather JSON: %w", err)
+	}
+
+	var sb strings.Builder
+
+	// Current conditions
+	if cc, ok := data["current_condition"].([]interface{}); ok && len(cc) > 0 {
+		cur := cc[0].(map[string]interface{})
+		desc := ""
+		if descs, ok := cur["weatherDesc"].([]interface{}); ok && len(descs) > 0 {
+			desc, _ = descs[0].(map[string]interface{})["value"].(string)
+		}
+		temp, _ := cur["temp_C"].(string)
+		feels, _ := cur["FeelsLikeC"].(string)
+		humidity, _ := cur["humidity"].(string)
+		wind, _ := cur["windspeedKmph"].(string)
+		fmt.Fprintf(&sb, "Now: %s, %s°C (feels %s°C), humidity %s%%, wind %s km/h\n",
+			desc, temp, feels, humidity, wind)
+	}
+
+	// 3-day forecast
+	if weather, ok := data["weather"].([]interface{}); ok {
+		for _, day := range weather {
+			d := day.(map[string]interface{})
+			date, _ := d["date"].(string)
+			maxC, _ := d["maxtempC"].(string)
+			minC, _ := d["mintempC"].(string)
+			desc := ""
+			if hourly, ok := d["hourly"].([]interface{}); ok && len(hourly) > 4 {
+				h := hourly[4].(map[string]interface{})
+				if descs, ok := h["weatherDesc"].([]interface{}); ok && len(descs) > 0 {
+					desc, _ = descs[0].(map[string]interface{})["value"].(string)
+				}
+			}
+			fmt.Fprintf(&sb, "%s: %s, min %s°C / max %s°C\n", date, desc, minC, maxC)
+		}
+	}
+
+	return strings.TrimSpace(sb.String()), nil
+}
+
+// handleGetCurrentDatetime returns the current date and time
+func (m *MCPManager) handleGetCurrentDatetime(ctx context.Context, client *AIClient, args map[string]interface{}) (string, error) {
+	now := time.Now()
+	return now.Format("2006-01-02 15:04:05 MST (Monday)"), nil
 }
 
 // ProcessLLMWithTools processes an LLM response that may contain tool calls

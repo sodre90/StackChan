@@ -45,6 +45,7 @@ var (
 			})
 
 			s := g.Server()
+			s.SetPort(12800)
 			s.BindHandler("/stackChan/ws", web_socket.Handler)
 
 			///Configuration file access
@@ -94,13 +95,21 @@ var (
 
 				// Build the OTA response JSON
 				// The ESP32 expects: { "firmware": {...}, "websocket": {...}, "server_time": {...} }
+				// Build local server URL for the device
+				localIP := "192.168.1.149"
+				otaUrl := fmt.Sprintf("http://%s:12800/xiaozhi/ota/", localIP)
+				wsUrl := fmt.Sprintf("ws://%s:12800/xiaozhi/ws", localIP)
+
 				otaResponse := map[string]interface{}{
 					"firmware": map[string]interface{}{
 						"version": "1.0.0",
 						"url":     fmt.Sprintf("http://%s/xiaozhi/firmware.bin", r.Host),
 					},
+					"wifi": map[string]interface{}{
+						"ota_url": otaUrl,
+					},
 					"websocket": map[string]interface{}{
-						"url":     fmt.Sprintf("ws://%s/xiaozhi/ws", r.Host),
+						"url":     wsUrl,
 						"version": 1,
 					},
 					"server_time": map[string]interface{}{

@@ -1,0 +1,20 @@
+# Binary
+StackChan
+StackChan.exe
+
+# Database
+*.sqlite
+*.sqlite3
+*.db
+
+# Config with personal settings (use config.yaml.example as template)
+# config.yaml  ← keep this committed so friends can see the structure
+
+# Session transcripts / editor artefacts
+*.txt
+.opencode/
+.idea/
+.vscode/
+
+# OS
+.DS_Store

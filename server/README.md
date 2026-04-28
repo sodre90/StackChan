@@ -12,6 +12,11 @@ as device interactions, post management, and comment systems, providing stable a
 - Comment CRUD (Create, Read, Update, Delete) operations
 - Dance control and data management
 - Persistent storage using a relational database
+- **Local AI voice pipeline** — fully offline speech-to-text → LLM → text-to-speech via WebSocket
+
+### Local AI setup
+
+For the full local AI setup (Whisper ASR + Ollama LLM + edge-tts TTS), see **[LOCAL_AI_SETUP.md](LOCAL_AI_SETUP.md)**.
 
 ---
 
