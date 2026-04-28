@@ -1,4 +1,4 @@
 [submodule "firmware/xiaozhi-esp32"]
 	path = firmware/xiaozhi-esp32
-	url = /Users/perdos/prj/xiaozhi-esp32
+	url = git@github.com:sodre90/xiaozhi-esp32.git
 	branch = stackchan
