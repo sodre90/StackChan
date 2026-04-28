@@ -143,27 +143,55 @@ The server listens on `:12800` by default.
 
 ---
 
-## Step 7 — Firmware: point the device to your server
+## Step 7 — Firmware: build and flash
 
-The device needs to know your server's local IP address. In the firmware source:
+### 7a — Get dependencies
 
-**`firmware/main/Kconfig.projbuild`** — set the OTA URL:
+```bash
+cd firmware/
+
+# Pull the xiaozhi-esp32 submodule (our fork with local-server patches)
+git submodule update --init --recursive
+
+# Fetch remaining components (mooncake, ArduinoJson, esp-now, etc.)
+python3 fetch_repos.py
+```
+
+### 7b — Set your server IP
+
+**`firmware/main/Kconfig.projbuild`** — OTA URL:
 ```
 default "http://YOUR_SERVER_IP:12800/xiaozhi/ota/"
 ```
 
-**`firmware/main/hal/utils/secret_logic/secret_logic.cpp`** — set the server URL:
+**`firmware/main/hal/utils/secret_logic/secret_logic.cpp`** — WebSocket server URL:
 ```cpp
 return "http://YOUR_SERVER_IP:12800";
 ```
 
-Also make sure the **sample rate** matches (already set in `config.h`):
+The sample rate is already set correctly in `config.h`:
 ```c
 #define AUDIO_INPUT_SAMPLE_RATE  16000
 #define AUDIO_OUTPUT_SAMPLE_RATE 16000
 ```
 
-Then rebuild and flash the firmware.
+### 7c — Build (Docker, recommended)
+
+```bash
+# First time: builds the Docker image (~5 min)
+./build.sh build
+```
+
+### 7d — Flash
+
+```bash
+./build.sh flash /dev/cu.usbmodem1201   # replace with your device port
+```
+
+List available ports:
+```bash
+ls /dev/cu.usb*
+```
 
 ---
 
@@ -202,6 +230,6 @@ echo "All services started."
 |---------|-------------|-----|
 | Device connects but no response | LLM not running | Check Ollama is up, model name matches |
 | Response in wrong language | `asr_language` or `tts_voice` mismatch | Set both to same language |
-| Very long delay before response | VAD not triggering | Speak clearly, pause for ~1.5s after finishing |
+| Very long delay before response | VAD not triggering | Speak clearly, pause for ~600ms after finishing |
 | Echo loop (device repeating itself) | Echo holdoff too short | Increase `1500*time.Millisecond` in `protocol.go` |
 | `listen stop` never received | Normal — device uses server VAD | Working as designed |
