@@ -2,10 +2,10 @@
 # Uses Ollama for LLM and local Whisper for ASR
 
 # OpenAI-compatible API base URL for LLM/TTS (Ollama)
-api_base_url: "http://localhost:8000/v1"
+api_base_url: "http://host.docker.internal:8000/v1"
 
 # OpenAI-compatible API base URL for ASR (local Whisper server)
-asr_base_url: "http://localhost:13000/v1"
+asr_base_url: "http://whisper:13000/v1"
 
 # API key (may be empty for local models)
 api_key: ""
@@ -17,7 +17,7 @@ asr_model: "whisper"
 llm_model: "Qwen3.6-35B-A3B-nvfp4-general"
 
 # OpenAI-compatible API base URL for TTS (local edge-tts server)
-tts_base_url: "http://localhost:14000/v1"
+tts_base_url: "http://tts:14000/v1"
 
 # TTS model and voice (voice names are mapped to edge-tts voices)
 tts_model: "edge-tts"
@@ -42,8 +42,17 @@ stream_llm: true
 # ASR language hint (forces Whisper to use this language instead of auto-detect)
 asr_language: "hu"
 
-# VAD silence timeout (ms)
-vad_silence_timeout_ms: 2500
+# VAD (Voice Activity Detection) settings
+# vad_silence_timeout_ms: Wait this long after last speech before triggering ASR
+# vad_ticker_interval_ms: How often to scan for new audio packets (lower = faster detection)
+# vad_rms_threshold: RMS energy threshold (0.0–1.0) for speech detection.
+#   Higher values = less sensitive (filters out more background noise).
+#   Lower values = more sensitive (may trigger on quiet speech but also on noise).
+#   If you see 15-20s delays with "VAD filter removed ~19s of audio", raise this value.
+#   Typical range: 0.01–0.1. Start at 0.05 and adjust based on your environment.
+vad_silence_timeout_ms: 800
+vad_ticker_interval_ms: 100
+vad_rms_threshold: 0.05
 
 # WebSocket port (0 = use main server port)
 ws_port: 0

@@ -1,4 +1,7 @@
-# Local AI Setup for StackChan
+# Local AI Setup for StackChan (without Docker)
+
+> **Recommended:** Use Docker Compose instead — see [DOCKER_SETUP.md](DOCKER_SETUP.md).
+> This guide is for running services directly on the host, without containers.
 
 This guide explains how to run the full local AI voice pipeline for StackChan:
 **microphone → Whisper ASR → LLM (Ollama) → edge-tts → speaker**.
@@ -203,6 +206,8 @@ When `enable_mcp_tools: true`, the LLM can call built-in tools:
 |------|-------------|
 | `get_weather` | Current conditions + 3-day forecast via wttr.in |
 | `get_current_datetime` | Returns current date/time with weekday |
+| `get_price` | Current price + 24h change for crypto (BTC, ETH…) or stocks (AAPL, TSLA…) |
+| `web_search` | Searches DuckDuckGo for current news and recent events |
 
 No configuration needed — tools are registered automatically at startup.
 

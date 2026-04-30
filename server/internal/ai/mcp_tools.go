@@ -12,11 +12,27 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"strings"
 	"sync"
 	"time"
 
 	"github.com/gorilla/websocket"
+)
+
+// Reminder represents a scheduled reminder created via the robot.create_reminder tool.
+type Reminder struct {
+	ID        string
+	Message   string
+	TriggerAt time.Time
+	Active    bool
+}
+
+// Binary protocol message types sent to the ESP32 device.
+const (
+	ControlAvatar byte = 0x03
+	ControlMotion byte = 0x04
+	Dance         byte = 0x14
 )
 
 // MCPTool represents an MCP (Model Context Protocol) tool that the LLM can call
@@ -29,16 +45,17 @@ type MCPTool struct {
 
 // MCPManager manages MCP tools for AI interaction
 type MCPManager struct {
-	mu       sync.RWMutex
-	tools    map[string]*MCPTool
-	deviceMu sync.RWMutex
-	devices  map[string]*DeviceState // mac -> device state
+	mu            sync.RWMutex
+	tools         map[string]*MCPTool
+	deviceMu      sync.RWMutex
+	devices       map[string]*DeviceState // mac -> device state
+	braveAPIKey   string
 }
 
 // DeviceState tracks the state of an ESP32 device
 type DeviceState struct {
 	Mac           string
-	Conn          *websocket.Conn
+	write         func(int, []byte) error // thread-safe write via AIClient.writeWS
 	HeadYaw       float64
 	HeadPitch     float64
 	LEDRed        int
@@ -53,10 +70,15 @@ type DeviceState struct {
 }
 
 // NewMCPManager creates a new MCP tool manager
-func NewMCPManager() *MCPManager {
+func NewMCPManager(braveAPIKey ...string) *MCPManager {
+	key := ""
+	if len(braveAPIKey) > 0 {
+		key = braveAPIKey[0]
+	}
 	m := &MCPManager{
-		tools:   make(map[string]*MCPTool),
-		devices: make(map[string]*DeviceState),
+		tools:       make(map[string]*MCPTool),
+		devices:     make(map[string]*DeviceState),
+		braveAPIKey: key,
 	}
 
 	// Register default robot control tools
@@ -186,6 +208,32 @@ func NewMCPManager() *MCPManager {
 		Handler: m.handleGetCurrentDatetime,
 	})
 
+	m.RegisterTool(MCPTool{
+		Name:        "get_price",
+		Description: "Get the current price and 24-hour change for a cryptocurrency or stock. Examples: 'bitcoin', 'ethereum', 'BTC', 'AAPL', 'TSLA'. Always call this for any price or market question.",
+		Parameters: map[string]interface{}{
+			"type": "object",
+			"properties": map[string]interface{}{
+				"asset": map[string]interface{}{"type": "string", "description": "Crypto name/symbol (e.g. bitcoin, BTC, ethereum) or stock ticker (e.g. AAPL, TSLA)"},
+			},
+			"required": []string{"asset"},
+		},
+		Handler: m.handleGetPrice,
+	})
+
+	m.RegisterTool(MCPTool{
+		Name:        "web_search",
+		Description: "Search the internet for current news, recent events, or any information that might be outdated in training data. Use this whenever the user asks about something that may have changed recently.",
+		Parameters: map[string]interface{}{
+			"type": "object",
+			"properties": map[string]interface{}{
+				"query": map[string]interface{}{"type": "string", "description": "The search query"},
+			},
+			"required": []string{"query"},
+		},
+		Handler: m.handleWebSearch,
+	})
+
 	return m
 }
 
@@ -231,13 +279,14 @@ func (m *MCPManager) GetToolDefinitions() []map[string]interface{} {
 	return defs
 }
 
-// RegisterDevice registers a device state for MCP tool integration
-func (m *MCPManager) RegisterDevice(mac string, conn *websocket.Conn) {
+// RegisterDevice registers a device state for MCP tool integration.
+// write must be a goroutine-safe write function (e.g. client.writeWS).
+func (m *MCPManager) RegisterDevice(mac string, write func(int, []byte) error) {
 	m.deviceMu.Lock()
 	defer m.deviceMu.Unlock()
 	m.devices[mac] = &DeviceState{
 		Mac:       mac,
-		Conn:      conn,
+		write:     write,
 		HeadYaw:   0,
 		HeadPitch: 0,
 		LEDRed:    0,
@@ -280,7 +329,7 @@ func (m *MCPManager) SendToDevice(mac string, msgType byte, data []byte) error {
 	ds, ok := m.devices[mac]
 	m.deviceMu.RUnlock()
 
-	if !ok || ds.Conn == nil {
+	if !ok || ds.write == nil {
 		return fmt.Errorf("device %s not found or offline", mac)
 	}
 
@@ -290,8 +339,7 @@ func (m *MCPManager) SendToDevice(mac string, msgType byte, data []byte) error {
 	binary.BigEndian.PutUint32(payload[1:5], uint32(len(data)))
 	copy(payload[5:], data)
 
-	err := ds.Conn.WriteMessage(websocket.BinaryMessage, payload)
-	if err != nil {
+	if err := ds.write(websocket.BinaryMessage, payload); err != nil {
 		m.MarkDeviceOffline(mac)
 		return fmt.Errorf("failed to send to device: %v", err)
 	}
@@ -305,7 +353,7 @@ func (m *MCPManager) SendTextToDevice(mac string, msg interface{}) error {
 	ds, ok := m.devices[mac]
 	m.deviceMu.RUnlock()
 
-	if !ok || ds.Conn == nil {
+	if !ok || ds.write == nil {
 		return fmt.Errorf("device %s not found or offline", mac)
 	}
 
@@ -314,8 +362,7 @@ func (m *MCPManager) SendTextToDevice(mac string, msg interface{}) error {
 		return fmt.Errorf("failed to marshal message: %v", err)
 	}
 
-	err = ds.Conn.WriteMessage(websocket.TextMessage, data)
-	if err != nil {
+	if err = ds.write(websocket.TextMessage, data); err != nil {
 		m.MarkDeviceOffline(mac)
 		return fmt.Errorf("failed to send to device: %v", err)
 	}
@@ -709,52 +756,273 @@ func (m *MCPManager) handleGetCurrentDatetime(ctx context.Context, client *AICli
 	return now.Format("2006-01-02 15:04:05 MST (Monday)"), nil
 }
 
-// ProcessLLMWithTools processes an LLM response that may contain tool calls
-func ProcessLLMWithTools(ctx context.Context, mcpManager *MCPManager, client *AIClient, response string) (string, error) {
-	// Check if the response contains tool call markers
-	if !strings.Contains(response, "<tool_call>") {
-		return response, nil
+// binanceSymbols maps common crypto names/symbols to Binance USDT trading pairs
+var binanceSymbols = map[string]string{
+	"bitcoin": "BTCUSDT", "btc": "BTCUSDT",
+	"ethereum": "ETHUSDT", "eth": "ETHUSDT",
+	"solana": "SOLUSDT", "sol": "SOLUSDT",
+	"cardano": "ADAUSDT", "ada": "ADAUSDT",
+	"dogecoin": "DOGEUSDT", "doge": "DOGEUSDT",
+	"ripple": "XRPUSDT", "xrp": "XRPUSDT",
+	"polkadot": "DOTUSDT", "dot": "DOTUSDT",
+	"chainlink": "LINKUSDT", "link": "LINKUSDT",
+	"litecoin": "LTCUSDT", "ltc": "LTCUSDT",
+	"avalanche": "AVAXUSDT", "avax": "AVAXUSDT",
+	"shiba": "SHIBUSDT", "shib": "SHIBUSDT",
+	"matic": "MATICUSDT", "polygon": "MATICUSDT",
+	"uniswap": "UNIUSDT", "uni": "UNIUSDT",
+	"bnb": "BNBUSDT", "binancecoin": "BNBUSDT",
+}
+
+// handleGetPrice fetches crypto price from Binance or stock price from Yahoo Finance
+func (m *MCPManager) handleGetPrice(ctx context.Context, client *AIClient, args map[string]interface{}) (string, error) {
+	asset, _ := args["asset"].(string)
+	if asset == "" {
+		return "", fmt.Errorf("asset must be a non-empty string")
 	}
 
-	// Extract tool calls and execute them
-	toolCalls := extractToolCalls(response)
+	lower := strings.ToLower(strings.TrimSpace(asset))
+	if sym, ok := binanceSymbols[lower]; ok {
+		return fetchCryptoPrice(ctx, sym, asset)
+	}
+	return fetchStockPrice(ctx, strings.ToUpper(strings.TrimSpace(asset)))
+}
 
-	var resultParts []string
-	resultParts = append(resultParts, extractTextBeforeTools(response))
+// fetchCryptoPrice queries Binance for a crypto price (free, no API key, generous limits)
+func fetchCryptoPrice(ctx context.Context, symbol, displayName string) (string, error) {
+	u := "https://api.binance.com/api/v3/ticker/24hr?symbol=" + url.QueryEscape(symbol)
 
-	for _, call := range toolCalls {
-		result, err := mcpManager.CallTool(ctx, client, call.Name, call.Args)
-		if err != nil {
-			resultParts = append(resultParts, fmt.Sprintf("[Tool error: %v]", err))
-		} else {
-			resultParts = append(resultParts, fmt.Sprintf("[Tool result: %s]", result))
+	req, err := http.NewRequestWithContext(ctx, "GET", u, nil)
+	if err != nil {
+		return "", err
+	}
+	req.Header.Set("User-Agent", "StackChan/1.0")
+
+	resp, err := (&http.Client{Timeout: 8 * time.Second}).Do(req)
+	if err != nil {
+		return "", fmt.Errorf("Binance request failed: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode == 400 {
+		return "", fmt.Errorf("unknown crypto symbol: %s", displayName)
+	}
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return "", err
+	}
+
+	var data map[string]interface{}
+	if err := json.Unmarshal(body, &data); err != nil {
+		return "", fmt.Errorf("parse Binance response: %w", err)
+	}
+
+	priceStr, _ := data["lastPrice"].(string)
+	changeStr, _ := data["priceChangePercent"].(string)
+
+	price := 0.0
+	fmt.Sscanf(priceStr, "%f", &price)
+	change := 0.0
+	fmt.Sscanf(changeStr, "%f", &change)
+
+	sign := "+"
+	if change < 0 {
+		sign = ""
+	}
+	return fmt.Sprintf("%s: $%.2f (%s%.2f%% 24h)", displayName, price, sign, change), nil
+}
+
+// fetchStockPrice queries Yahoo Finance for a stock price
+func fetchStockPrice(ctx context.Context, ticker string) (string, error) {
+	u := fmt.Sprintf("https://query1.finance.yahoo.com/v8/finance/chart/%s?interval=1d&range=1d",
+		url.QueryEscape(ticker))
+
+	req, err := http.NewRequestWithContext(ctx, "GET", u, nil)
+	if err != nil {
+		return "", err
+	}
+	req.Header.Set("User-Agent", "Mozilla/5.0 (compatible; StackChan/1.0)")
+
+	resp, err := (&http.Client{Timeout: 8 * time.Second}).Do(req)
+	if err != nil {
+		return "", fmt.Errorf("Yahoo Finance request failed: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode == 404 {
+		return "", fmt.Errorf("ticker %s not found", ticker)
+	}
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return "", err
+	}
+
+	var data map[string]interface{}
+	if err := json.Unmarshal(body, &data); err != nil {
+		return "", fmt.Errorf("parse Yahoo Finance response: %w", err)
+	}
+
+	chart, _ := data["chart"].(map[string]interface{})
+	results, _ := chart["result"].([]interface{})
+	if len(results) == 0 {
+		return "", fmt.Errorf("no data for ticker %s", ticker)
+	}
+
+	result := results[0].(map[string]interface{})
+	meta, _ := result["meta"].(map[string]interface{})
+
+	price, _ := meta["regularMarketPrice"].(float64)
+	prevClose, _ := meta["chartPreviousClose"].(float64)
+	currency, _ := meta["currency"].(string)
+	name, _ := meta["shortName"].(string)
+	if name == "" {
+		name = ticker
+	}
+
+	var changeStr string
+	if prevClose > 0 {
+		change := ((price - prevClose) / prevClose) * 100
+		sign := "+"
+		if change < 0 {
+			sign = ""
+		}
+		changeStr = fmt.Sprintf(" (%s%.2f%% today)", sign, change)
+	}
+
+	return fmt.Sprintf("%s (%s): %.2f %s%s", name, ticker, price, currency, changeStr), nil
+}
+
+// handleWebSearch searches for current information using DDG instant answers or Brave Search
+func (m *MCPManager) handleWebSearch(ctx context.Context, client *AIClient, args map[string]interface{}) (string, error) {
+	query, _ := args["query"].(string)
+	if query == "" {
+		return "", fmt.Errorf("query must be a non-empty string")
+	}
+
+	// Brave Search API (if configured) — full web results
+	if m.braveAPIKey != "" {
+		result, err := braveSearch(ctx, m.braveAPIKey, query)
+		if err == nil && result != "" {
+			return result, nil
 		}
 	}
 
-	return strings.Join(resultParts, "\n"), nil
-}
-
-// toolCall represents a parsed tool call from LLM response
-type toolCall struct {
-	Name string
-	Args map[string]interface{}
-}
-
-// extractToolCalls extracts tool calls from LLM response text
-func extractToolCalls(response string) []toolCall {
-	// Simple extraction - in production, use proper tool call format parsing
-	var calls []toolCall
-
-	// Look for pattern: <tool_call>function_name(args)</tool_call>
-	// This is a placeholder - real implementation depends on LLM provider format
-
-	return calls
-}
-
-// extractTextBeforeTools extracts text before tool calls
-func extractTextBeforeTools(response string) string {
-	if idx := strings.Index(response, "<tool_call>"); idx > 0 {
-		return response[:idx]
+	// DuckDuckGo Instant Answer — free, no key, works for factual queries
+	if result := ddgInstantAnswer(ctx, query); result != "" {
+		return result, nil
 	}
-	return response
+
+	return fmt.Sprintf("No instant answer found for: %q. For full web search results, configure brave_search_api_key in config.yaml (free at search.brave.com).", query), nil
 }
+
+// braveSearch queries the Brave Search API for web results
+func braveSearch(ctx context.Context, apiKey, query string) (string, error) {
+	u := "https://api.search.brave.com/res/v1/web/search?q=" + url.QueryEscape(query) + "&count=5"
+	req, err := http.NewRequestWithContext(ctx, "GET", u, nil)
+	if err != nil {
+		return "", err
+	}
+	req.Header.Set("Accept", "application/json")
+	req.Header.Set("Accept-Encoding", "gzip")
+	req.Header.Set("X-Subscription-Token", apiKey)
+
+	resp, err := (&http.Client{Timeout: 10 * time.Second}).Do(req)
+	if err != nil {
+		return "", err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != 200 {
+		return "", fmt.Errorf("Brave Search returned %d", resp.StatusCode)
+	}
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return "", err
+	}
+
+	var data map[string]interface{}
+	if err := json.Unmarshal(body, &data); err != nil {
+		return "", err
+	}
+
+	web, _ := data["web"].(map[string]interface{})
+	results, _ := web["results"].([]interface{})
+	if len(results) == 0 {
+		return "", fmt.Errorf("no results")
+	}
+
+	var lines []string
+	for i, r := range results {
+		item, _ := r.(map[string]interface{})
+		title, _ := item["title"].(string)
+		desc, _ := item["description"].(string)
+		if title != "" && desc != "" {
+			lines = append(lines, fmt.Sprintf("%s: %s", title, desc))
+		} else if title != "" {
+			lines = append(lines, title)
+		}
+		if i >= 4 {
+			break
+		}
+	}
+	return strings.Join(lines, "\n\n"), nil
+}
+
+// ddgInstantAnswer queries the DuckDuckGo Instant Answer API (free, no key required)
+func ddgInstantAnswer(ctx context.Context, query string) string {
+	u := "https://api.duckduckgo.com/?q=" + url.QueryEscape(query) + "&format=json&no_html=1&skip_disambig=1"
+	req, err := http.NewRequestWithContext(ctx, "GET", u, nil)
+	if err != nil {
+		return ""
+	}
+	req.Header.Set("User-Agent", "StackChan/1.0")
+
+	resp, err := (&http.Client{Timeout: 8 * time.Second}).Do(req)
+	if err != nil {
+		return ""
+	}
+	defer resp.Body.Close()
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return ""
+	}
+
+	var data map[string]interface{}
+	if err := json.Unmarshal(body, &data); err != nil {
+		return ""
+	}
+
+	abstract, _ := data["AbstractText"].(string)
+	if abstract != "" {
+		source, _ := data["AbstractSource"].(string)
+		if source != "" {
+			return fmt.Sprintf("%s (Source: %s)", abstract, source)
+		}
+		return abstract
+	}
+
+	answer, _ := data["Answer"].(string)
+	return answer
+}
+
+// stripHTMLTags removes HTML tags from a string
+func stripHTMLTags(s string) string {
+	var b strings.Builder
+	inTag := false
+	for _, r := range s {
+		switch {
+		case r == '<':
+			inTag = true
+		case r == '>':
+			inTag = false
+		case !inTag:
+			b.WriteRune(r)
+		}
+	}
+	return strings.Join(strings.Fields(b.String()), " ")
+}
+

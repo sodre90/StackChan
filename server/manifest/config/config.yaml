@@ -62,8 +62,15 @@ ai:
   # LLM streaming: stream responses for lower latency
   stream_llm: true
 
-  # Voice activity detection: silence timeout in ms before processing speech
-  vad_silence_timeout_ms: 1500
+  # Voice activity detection: silence timeout in ms before processing speech.
+  # Lower = faster response but may cut off sentences; higher = more natural pauses.
+  # Default 800ms. Typical range: 500-1500ms.
+  vad_silence_timeout_ms: 800
+
+  # VAD ticker interval in ms: how often the server checks for new audio packets.
+  # Lower = faster end-of-speech detection (lower latency) but more CPU usage.
+  # Default 100ms. Reduce to 50ms for ultra-fast response.
+  vad_ticker_interval_ms: 100
 
   # WebSocket port for AI protocol (if different from main server port)
   # Set to 0 to use the main server port

@@ -39,21 +39,19 @@ const (
 	maxAudioBufferSize = 5 * 1024 * 1024 // 5MB max buffer
 	opusFrameDelayMs   = 55              // ms between Opus frames (frames are 60ms; 5ms margin absorbs OS sleep jitter)
 
-	// VAD thresholds
-	vadSpeechThreshold    = 800   // RMS threshold for speech detection
-	vadSilenceThreshold   = 300   // RMS threshold for silence detection
-	vadMinSpeechDuration  = 3     // Minimum frames of speech before triggering
-	vadMinSilenceDuration = 25    // Minimum frames of silence before processing
-	vadMaxSilenceDuration = 150   // Maximum silence frames before giving up
+	// VAD — inline RMS-based detector in processASRAndLLM.
+	// speechPreBuffer: packets kept before detected onset to avoid clipping first phoneme.
+	// RMS threshold and silence duration come from config (VADRMSThreshold, VADSilenceTimeoutMs).
+	speechPreBuffer = 5 // 5 × 60ms = 300ms pre-buffer
+
+	// Timing constants
+	vadMaxListenDuration = 20 * time.Second       // hard ceiling — process regardless of VAD
+	echoHoldoffDuration  = 1500 * time.Millisecond // ignore mic audio this long after TTS ends
+	ttsRecoveryCooldown  = 12 * time.Second        // minimum gap between empty-ASR TTS resets
 
 	// Retry settings
 	maxRetries       = 3
 	retryBaseDelayMs = 500
-
-	// Control message types (matching the binary protocol)
-	ControlAvatar byte = 0x03
-	ControlMotion byte = 0x04
-	Dance         byte = 0x14
 )
 
 var (
@@ -75,33 +73,26 @@ var (
 	activeClients = make(map[string]*AIClient)
 )
 
-// Reminder represents a scheduled reminder
-// Note: This type is shared between protocol.go and mcp_tools.go
-type Reminder struct {
-	ID        string
-	Message   string
-	TriggerAt time.Time
-	Active    bool
-}
-
 // AIClient represents a connected ESP32 device for AI interaction
 type AIClient struct {
 	Mac         string
 	Conn        *websocket.Conn
 	mu          *sync.RWMutex
+	writeMu     sync.Mutex // serialises all WebSocket writes (gorilla requires exclusive writer)
 	SessionID   string
 	LastTime    time.Time
 	ctx         context.Context
 	cancel      context.CancelFunc
 
 	// Audio processing — each element is one Opus packet from the device
-	opusPackets   [][]byte
-	isListening   bool
-	listenDone    chan struct{} // closed when device sends listen stop
-	decoder       *opus.Decoder // hraban/opus CGO decoder
-	vadState      vadState
-	vadFrameCount int
-	ttsEndedAt    time.Time // when the last TTS playback finished
+	opusPackets [][]byte
+	isListening bool
+	listenDone  chan struct{}  // closed when device sends listen stop
+	decoder     *opus.Decoder // hraban/opus CGO decoder
+	ttsEndedAt  time.Time     // when the last TTS playback finished (echo holdoff)
+
+	// Speaking cancellation — cancelled when device sends abort
+	speakCancel context.CancelFunc
 
 	// TTS recovery cooldown
 	lastRecoveryAt time.Time
@@ -110,15 +101,6 @@ type AIClient struct {
 	messages      []map[string]interface{}
 	contextMu     sync.RWMutex
 }
-
-// vadState tracks the VAD (Voice Activity Detection) state
-type vadState int
-
-const (
-	vadIdle vadState = iota
-	vadSpeaking
-	vadSilent
-)
 
 // XiaoZhiHelloMessage is the hello message from the device
 type XiaoZhiHelloMessage struct {
@@ -173,7 +155,7 @@ type XiaoZhiAbortMessage struct {
 // Initialize sets up the AI protocol handler with the given configuration
 func Initialize(config Config) {
 	aiConfig = config
-	mcpManager = NewMCPManager()
+	mcpManager = NewMCPManager(config.BraveSearchAPIKey)
 	logger.Info(context.Background(), "AI protocol initialized",
 		"api_base_url", config.APIBaseURL,
 		"llm_model", config.LLMModel,
@@ -185,6 +167,8 @@ func Initialize(config Config) {
 		"enable_tts", config.EnableTTS,
 		"context_messages", config.ContextMessages,
 		"vad_silence_timeout_ms", config.VADSilenceTimeoutMs,
+		"vad_ticker_interval_ms", config.VADTickerIntervalMs,
+		"vad_rms_threshold", config.VADRMSThreshold,
 	)
 }
 
@@ -209,13 +193,11 @@ func Handler(r *ghttp.Request) {
 	}
 
 	client := &AIClient{
-		Mac:        mac,
-		Conn:       ws,
-		mu:         &sync.RWMutex{},
-		ctx:        ctx,
-		LastTime:   time.Now(),
-		vadState:   vadIdle,
-		vadFrameCount: 0,
+		Mac:      mac,
+		Conn:     ws,
+		mu:       &sync.RWMutex{},
+		ctx:      ctx,
+		LastTime: time.Now(),
 	}
 	client.ctx, client.cancel = context.WithCancel(ctx)
 
@@ -233,8 +215,9 @@ func Handler(r *ghttp.Request) {
 	activeClients[mac] = client
 	clientsMu.Unlock()
 
-	// Register device with MCP manager
-	mcpManager.RegisterDevice(mac, ws)
+	// Register device with MCP manager — pass the client's serialised write function
+	// so MCP tool writes share the same writeMu and never race with sendJSON/sendAudioChunks.
+	mcpManager.RegisterDevice(mac, client.writeWS)
 
 	logger.Info(ctx, "AI client connected", "mac", mac)
 	defer func() {
@@ -303,8 +286,8 @@ func handleBinaryMessage(ctx context.Context, client *AIClient, msg []byte) {
 		return
 	}
 
-	// Discard audio during echo holdoff window — first 1.5s after TTS ends is likely speaker echo
-	if !client.ttsEndedAt.IsZero() && time.Since(client.ttsEndedAt) < 1500*time.Millisecond {
+	// Discard audio during echo holdoff window — speaker echo for echoHoldoffDuration after TTS
+	if !client.ttsEndedAt.IsZero() && time.Since(client.ttsEndedAt) < echoHoldoffDuration {
 		return
 	}
 
@@ -356,8 +339,6 @@ func handleListen(ctx context.Context, client *AIClient, envelope map[string]int
 		client.isListening = true
 		client.opusPackets = nil
 		client.listenDone = make(chan struct{})
-		client.vadState = vadIdle
-		client.vadFrameCount = 0
 		client.mu.Unlock()
 		logger.Info(ctx, "Listening started", "mode", mode)
 
@@ -390,7 +371,16 @@ func handleListen(ctx context.Context, client *AIClient, envelope map[string]int
 // handleAbort processes the abort speaking message
 func handleAbort(ctx context.Context, client *AIClient, envelope map[string]interface{}) {
 	reason, _ := envelope["reason"].(string)
-	logger.Info(ctx, "Speaking aborted", "reason", reason)
+	logger.Info(ctx, "Speaking aborted by device", "reason", reason)
+
+	client.mu.Lock()
+	cancel := client.speakCancel
+	client.speakCancel = nil
+	client.mu.Unlock()
+
+	if cancel != nil {
+		cancel()
+	}
 }
 
 // processASRAndLLM handles the ASR -> LLM pipeline with VAD
@@ -399,27 +389,43 @@ func processASRAndLLM(ctx context.Context, client *AIClient, mode string) {
 	listenDone := client.listenDone
 	client.mu.RUnlock()
 
-	// Server-side VAD: decode packets every 300ms and detect end-of-speech.
-	// Closes listenDone (same channel handleListen("stop") uses) when silence
-	// follows speech. The 20s outer timeout is a safety fallback.
-	const (
-		speechRMS  = 0.025 // ~800/32768 — voice activity threshold
-		silenceRMS = 0.009 // ~300/32768 — silence threshold
-	)
-	vadDecoder, _ := opus.NewDecoder(OpusSampleRate, OpusChannels)
+	// Server-side VAD: decode new packets every vadTickerInterval and detect end-of-speech.
+	// Closes listenDone (same channel handleListen("stop") uses) when silence follows speech.
+	// vadMaxListenDuration is a hard ceiling in case the device never goes quiet.
+	vadDecoder, err := opus.NewDecoder(OpusSampleRate, OpusChannels)
+	if err != nil {
+		logger.Errorf(ctx, "Failed to create VAD Opus decoder: %v", err)
+		return
+	}
 	pcmBuf := make([]int16, 5760)
 	var seenSpeech bool
-	var silenceFrames int
+	var lastSpeechAt time.Time
 	var vadPktIdx int
-	vadTicker := time.NewTicker(300 * time.Millisecond)
+	speechStartIdx := -1 // packet index where voice onset was first detected (-1 = not yet)
+
+	silenceDuration := time.Duration(aiConfig.VADSilenceTimeoutMs) * time.Millisecond
+	if silenceDuration <= 0 {
+		silenceDuration = 800 * time.Millisecond
+	}
+
+	// VAD ticker interval: how often to scan for new audio packets.
+	// Shorter = faster detection but more CPU; longer = smoother but higher latency.
+	vadInterval := time.Duration(aiConfig.VADTickerIntervalMs) * time.Millisecond
+	if vadInterval <= 0 {
+		vadInterval = 100 * time.Millisecond
+	}
+
+	vadTicker := time.NewTicker(vadInterval)
 	defer vadTicker.Stop()
+	maxDuration := time.NewTimer(vadMaxListenDuration)
+	defer maxDuration.Stop()
 
 vadLoop:
 	for {
 		select {
 		case <-listenDone:
 			break vadLoop
-		case <-time.After(20 * time.Second):
+		case <-maxDuration.C:
 			logger.Debugf(ctx, "Max listen duration reached, processing accumulated audio")
 			break vadLoop
 		case <-vadTicker.C:
@@ -430,25 +436,39 @@ vadLoop:
 			if vadPktIdx > len(allPkts) {
 				vadPktIdx = len(allPkts)
 			}
-			for _, pkt := range allPkts[vadPktIdx:] {
+			prevSpeechStartIdx := speechStartIdx
+			maxRmsInTick := 0.0
+			for i, pkt := range allPkts[vadPktIdx:] {
 				n, err := vadDecoder.Decode(pkt, pcmBuf)
 				if err != nil || n == 0 {
 					continue
 				}
 				rms := calculateRMS(pcmBuf[:n])
-				if rms > speechRMS {
+				if rms > maxRmsInTick {
+					maxRmsInTick = rms
+				}
+				if rms > aiConfig.VADRMSThreshold {
+					if speechStartIdx < 0 {
+						speechStartIdx = vadPktIdx + i // record onset
+					}
 					seenSpeech = true
-					silenceFrames = 0
-				} else if rms < silenceRMS && seenSpeech {
-					silenceFrames++
+					lastSpeechAt = time.Now()
 				}
 			}
 			vadPktIdx = len(allPkts)
 
-			if seenSpeech && silenceFrames >= vadMinSilenceDuration {
-				logger.Debugf(ctx, "Server VAD: speech ended (%d silence frames), triggering ASR", silenceFrames)
-				// Close listenDone so the select fires immediately next tick — same
-				// safe-close pattern as handleListen("stop")
+			// Speech just started this tick — tell the device to show a listening face
+			if speechStartIdx >= 0 && prevSpeechStartIdx < 0 {
+				sendLLM(ctx, client, "thinking", "")
+			}
+
+			// Log max RMS each tick for debugging VAD sensitivity
+			if maxRmsInTick > 0 {
+				logger.Debugf(ctx, "Server VAD tick: maxRMS=%.4f threshold=%.4f seenSpeech=%v silence=%.0fms", maxRmsInTick, aiConfig.VADRMSThreshold, seenSpeech, time.Since(lastSpeechAt).Milliseconds())
+			}
+
+			if seenSpeech && !lastSpeechAt.IsZero() && time.Since(lastSpeechAt) >= silenceDuration {
+				logger.Debugf(ctx, "Server VAD: speech ended (%.0fms silence), triggering ASR", time.Since(lastSpeechAt).Seconds()*1000)
 				client.mu.RLock()
 				done := client.listenDone
 				client.mu.RUnlock()
@@ -471,6 +491,14 @@ vadLoop:
 	client.opusPackets = nil
 	client.isListening = false
 	client.mu.Unlock()
+
+	// Trim leading silence: start from a few frames before speech onset so we
+	// don't clip the first phoneme (5 frames × 60ms = 300ms pre-buffer).
+	if speechStartIdx > speechPreBuffer {
+		startIdx := speechStartIdx - speechPreBuffer
+		logger.Debugf(ctx, "Trimming %d leading-silence packets (speech onset at packet %d)", startIdx, speechStartIdx)
+		packets = packets[startIdx:]
+	}
 
 	totalBytes := 0
 	for _, p := range packets {
@@ -497,7 +525,7 @@ vadLoop:
 			return
 		}
 		// Guard against rapid TTS recovery cycling
-		if !lastRecovery.IsZero() && time.Since(lastRecovery) < 12*time.Second {
+		if !lastRecovery.IsZero() && time.Since(lastRecovery) < ttsRecoveryCooldown {
 			logger.Debugf(ctx, "Skipping TTS recovery, last was %v ago", time.Since(lastRecovery).Round(time.Millisecond))
 			return
 		}
@@ -520,47 +548,178 @@ vadLoop:
 	go processLLMResponse(ctx, client, transcribedText)
 }
 
-// processLLMResponse handles the LLM -> TTS pipeline
+// processLLMResponse handles the LLM -> TTS pipeline with sentence-level streaming.
+// For streaming LLM without tools, TTS fires per sentence as tokens arrive.
+// For tools / non-streaming, the full response is split into sentences after the fact.
 func processLLMResponse(ctx context.Context, client *AIClient, userText string) {
-	// Add user message to context
 	addMessageToContext(ctx, client, "user", userText)
 
-	// Call LLM (with streaming support)
-	response := callLLM(ctx, client)
-	if response == "" {
-		return
-	}
+	// Create a speak context so handleAbort can cancel mid-playback.
+	speakCtx, speakCancel := context.WithCancel(ctx)
+	client.mu.Lock()
+	client.speakCancel = speakCancel
+	client.mu.Unlock()
+	defer func() {
+		speakCancel()
+		client.mu.Lock()
+		client.speakCancel = nil
+		client.mu.Unlock()
+	}()
 
-	// Strip emojis — TTS speaks them aloud as descriptions
-	response = stripEmojis(response)
-	if response == "" {
-		return
-	}
+	sendTTS(speakCtx, client, "start", "")
 
-	// Add assistant response to context
-	addMessageToContext(ctx, client, "assistant", response)
+	var fullResponse string
 
-	// Send TTS start
-	sendTTS(ctx, client, "start", "")
-
-	// Send the text for display
-	sendTTS(ctx, client, "sentence_start", response)
-
-	// If TTS is enabled, generate speech
-	if aiConfig.EnableTTS {
-		audioData := generateSpeech(ctx, response)
-		if len(audioData) > 0 {
-			sendAudioChunks(ctx, client, audioData)
+	if !aiConfig.EnableMCPTools && aiConfig.StreamLLM {
+		// Sentence-streaming: LLM tokens feed into the accumulator; TTS fires per sentence.
+		fullResponse = streamLLMSentences(speakCtx, client)
+	} else {
+		// Tools or non-streaming: get the complete response, then speak sentence by sentence.
+		fullResponse = callLLM(speakCtx, client)
+		fullResponse = stripEmojis(fullResponse)
+		for _, sentence := range splitSentences(fullResponse) {
+			if speakCtx.Err() != nil {
+				break
+			}
+			sendTTS(speakCtx, client, "sentence_start", sentence)
+			if aiConfig.EnableTTS {
+				if audio := generateSpeech(speakCtx, sentence); len(audio) > 0 {
+					sendAudioChunks(speakCtx, client, audio)
+				}
+			}
 		}
 	}
 
-	// Record when TTS finished so ASR can ignore immediate echo
+	if fullResponse == "" {
+		sendTTS(ctx, client, "stop", "")
+		return
+	}
+
+	addMessageToContext(ctx, client, "assistant", fullResponse)
+
 	client.mu.Lock()
 	client.ttsEndedAt = time.Now()
 	client.mu.Unlock()
 
-	// Send TTS stop — device handles auto-mode re-listening itself
 	sendTTS(ctx, client, "stop", "")
+}
+
+// streamLLMSentences streams the LLM response and calls TTS for each sentence as it completes.
+// Returns the full assembled response text.
+func streamLLMSentences(ctx context.Context, client *AIClient) string {
+	systemPrompt := aiConfig.SystemPrompt
+	if systemPrompt == "" {
+		systemPrompt = "You are a helpful AI assistant."
+	}
+
+	contextMessages := getContextMessages(ctx, client)
+	messages := []map[string]interface{}{{"role": "system", "content": systemPrompt}}
+	messages = append(messages, contextMessages...)
+
+	requestBody := map[string]interface{}{
+		"model":       aiConfig.LLMModel,
+		"messages":    messages,
+		"temperature": 0.7,
+		"max_tokens":  512,
+		"stream":      true,
+	}
+	bodyBytes, err := json.Marshal(requestBody)
+	if err != nil {
+		logger.Errorf(ctx, "Failed to marshal LLM request: %v", err)
+		return ""
+	}
+
+	req, err := http.NewRequestWithContext(ctx, "POST",
+		aiConfig.APIBaseURL+"/chat/completions", bytes.NewReader(bodyBytes))
+	if err != nil {
+		logger.Errorf(ctx, "Failed to create LLM request: %v", err)
+		return ""
+	}
+	req.Header.Set("Content-Type", "application/json")
+	if aiConfig.APIKey != "" {
+		req.Header.Set("Authorization", "Bearer "+aiConfig.APIKey)
+	}
+
+	httpClient := &http.Client{Timeout: 60 * time.Second}
+	resp, err := httpClient.Do(req)
+	if err != nil {
+		logger.Errorf(ctx, "LLM request failed: %v", err)
+		return ""
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		logger.Errorf(ctx, "LLM API error (status %d): %s", resp.StatusCode, string(body))
+		return ""
+	}
+
+	var acc sentenceAccumulator
+	var assembled strings.Builder
+
+	speak := func(sentence string) {
+		if ctx.Err() != nil {
+			return
+		}
+		sentence = stripEmojis(sentence)
+		if sentence == "" {
+			return
+		}
+		assembled.WriteString(sentence)
+		assembled.WriteByte(' ')
+		sendTTS(ctx, client, "sentence_start", sentence)
+		if aiConfig.EnableTTS {
+			if audio := generateSpeech(ctx, sentence); len(audio) > 0 {
+				sendAudioChunks(ctx, client, audio)
+			}
+		}
+	}
+
+	scanner := bufio.NewScanner(resp.Body)
+	scanner.Buffer(make([]byte, 1024*1024), 1024*1024)
+	for scanner.Scan() {
+		line := scanner.Text()
+		if !strings.HasPrefix(line, "data: ") {
+			continue
+		}
+		data := strings.TrimPrefix(line, "data: ")
+		if data == "[DONE]" {
+			break
+		}
+		var chunk map[string]interface{}
+		if err := json.Unmarshal([]byte(data), &chunk); err != nil {
+			continue
+		}
+		choices, ok := chunk["choices"].([]interface{})
+		if !ok || len(choices) == 0 {
+			continue
+		}
+		delta, ok := choices[0].(map[string]interface{})["delta"].(map[string]interface{})
+		if !ok {
+			continue
+		}
+		token, _ := delta["content"].(string)
+		if token == "" {
+			continue
+		}
+		for _, sentence := range acc.feed(token) {
+			speak(sentence)
+		}
+	}
+	if err := scanner.Err(); err != nil {
+		logger.Errorf(ctx, "LLM streaming error: %v", err)
+	}
+
+	// Speak any trailing text that didn't end with sentence-ending punctuation
+	if remainder := acc.drain(); remainder != "" {
+		speak(remainder)
+	}
+
+	response := strings.TrimSpace(assembled.String())
+	if response != "" {
+		logger.Infof(ctx, "LLM sentence-stream response: %s", response)
+	}
+	return response
 }
 
 // addMessageToContext adds a message to the client's conversation context
@@ -1207,20 +1366,35 @@ func extractOpusFramesFromOGG(data []byte) ([][]byte, error) {
 	return frames, nil
 }
 
-// sendAudioChunks demuxes OGG audio and sends each Opus frame as a separate WebSocket message.
-// The ESP32 Opus decoder requires exactly one raw Opus packet per WebSocket binary message.
+// sendAudioChunks sends TTS audio to the ESP32 as individual Opus frames.
+// Auto-detects format: WAV (RIFF header) is encoded to Opus on the fly;
+// OGG/Opus is demuxed directly. The ESP32 decoder requires one Opus packet per message.
 func sendAudioChunks(ctx context.Context, client *AIClient, audioData []byte) {
 	if len(audioData) == 0 {
 		return
 	}
 
-	frames, err := extractOpusFramesFromOGG(audioData)
-	if err != nil {
-		logger.Errorf(ctx, "Failed to parse OGG for playback: %v", err)
-		return
+	var frames [][]byte
+	var err error
+
+	if len(audioData) >= 4 && string(audioData[0:4]) == "RIFF" {
+		// WAV input (e.g. from omlx) — resample to 16kHz and encode to Opus
+		frames, err = wavToOpusFrames(audioData)
+		if err != nil {
+			logger.Errorf(ctx, "Failed to encode WAV to Opus: %v", err)
+			return
+		}
+	} else {
+		// OGG/Opus input (e.g. from edge-tts) — demux raw Opus frames
+		frames, err = extractOpusFramesFromOGG(audioData)
+		if err != nil {
+			logger.Errorf(ctx, "Failed to parse OGG for playback: %v", err)
+			return
+		}
 	}
+
 	if len(frames) == 0 {
-		logger.Warning(ctx, "No Opus frames found in OGG data")
+		logger.Warning(ctx, "No Opus frames extracted from TTS audio")
 		return
 	}
 
@@ -1228,18 +1402,18 @@ func sendAudioChunks(ctx context.Context, client *AIClient, audioData []byte) {
 	sentFrames := 0
 
 	for _, frame := range frames {
-		client.mu.RLock()
-		conn := client.Conn
-		client.mu.RUnlock()
-
-		if conn == nil {
-			logger.Warning(ctx, "Client disconnected during audio playback")
-			break
+		if ctx.Err() != nil {
+			logger.Infof(ctx, "Audio playback interrupted after %d/%d frames", sentFrames, totalFrames)
+			return
 		}
 
-		if err := conn.WriteMessage(websocket.BinaryMessage, frame); err != nil {
-			logger.Errorf(ctx, "Failed to send audio frame %d/%d: %v", sentFrames+1, totalFrames, err)
-			sendTTS(ctx, client, "abort", "connection error")
+		if err := client.writeWS(websocket.BinaryMessage, frame); err != nil {
+			if err.Error() == "websocket connection is nil" {
+				logger.Warning(ctx, "Client disconnected during audio playback")
+			} else {
+				logger.Errorf(ctx, "Failed to send audio frame %d/%d: %v", sentFrames+1, totalFrames, err)
+				sendTTS(ctx, client, "abort", "connection error")
+			}
 			break
 		}
 
@@ -1252,6 +1426,21 @@ func sendAudioChunks(ctx context.Context, client *AIClient, audioData []byte) {
 	}
 }
 
+// writeWS sends a WebSocket message with exclusive write access.
+// gorilla/websocket requires that no two goroutines write concurrently; writeMu
+// enforces that across sendJSON, sendAudioChunks, and MCP tool writes.
+func (c *AIClient) writeWS(messageType int, data []byte) error {
+	c.writeMu.Lock()
+	defer c.writeMu.Unlock()
+	c.mu.RLock()
+	conn := c.Conn
+	c.mu.RUnlock()
+	if conn == nil {
+		return fmt.Errorf("websocket connection is nil")
+	}
+	return conn.WriteMessage(messageType, data)
+}
+
 // sendJSON sends a JSON message to the device
 func sendJSON(ctx context.Context, client *AIClient, data interface{}) {
 	msg, err := json.Marshal(data)
@@ -1260,11 +1449,7 @@ func sendJSON(ctx context.Context, client *AIClient, data interface{}) {
 		return
 	}
 
-	client.mu.RLock()
-	err = client.Conn.WriteMessage(websocket.TextMessage, msg)
-	client.mu.RUnlock()
-
-	if err != nil {
+	if err = client.writeWS(websocket.TextMessage, msg); err != nil {
 		logger.Errorf(ctx, "Failed to send JSON message: %v", err)
 	}
 }
@@ -1288,29 +1473,6 @@ func sendTTS(ctx context.Context, client *AIClient, state, text string) {
 	}
 	if text != "" {
 		msg["text"] = text
-	}
-	sendJSON(ctx, client, msg)
-}
-
-// sendAbort sends an abort message to stop current playback
-func sendAbort(ctx context.Context, client *AIClient, reason string) {
-	msg := map[string]interface{}{
-		"type":       "abort",
-		"session_id": client.SessionID,
-		"reason":     reason,
-	}
-	sendJSON(ctx, client, msg)
-}
-
-// sendListen sends a listen state message to the device
-func sendListen(ctx context.Context, client *AIClient, state, mode string) {
-	msg := map[string]interface{}{
-		"type":       "listen",
-		"session_id": client.SessionID,
-		"state":      state,
-	}
-	if mode != "" {
-		msg["mode"] = mode
 	}
 	sendJSON(ctx, client, msg)
 }
@@ -1352,6 +1514,87 @@ func GetActiveClients() []string {
 		result = append(result, mac)
 	}
 	return result
+}
+
+// sentenceAccumulator buffers streaming LLM tokens and yields complete sentences.
+type sentenceAccumulator struct {
+	buf strings.Builder
+}
+
+// feed adds a token and returns any complete sentences now available.
+func (sa *sentenceAccumulator) feed(token string) []string {
+	sa.buf.WriteString(token)
+	var out []string
+	text := sa.buf.String()
+	for {
+		end := sentenceBoundary(text)
+		if end < 0 {
+			break
+		}
+		sentence := strings.TrimSpace(text[:end])
+		text = strings.TrimLeft(text[end:], " \t\n\r")
+		if len(sentence) >= 3 {
+			out = append(out, sentence)
+		}
+	}
+	sa.buf.Reset()
+	sa.buf.WriteString(text)
+	return out
+}
+
+// drain returns any remaining buffered text as a final (unpunctuated) sentence.
+func (sa *sentenceAccumulator) drain() string {
+	s := strings.TrimSpace(sa.buf.String())
+	sa.buf.Reset()
+	return s
+}
+
+// sentenceBoundary returns the index just past the first sentence-ending punctuation
+// that is followed by whitespace or end-of-string. Returns -1 if none found.
+// Consecutive punctuation (e.g. "..." or "!!") is treated as one boundary.
+func sentenceBoundary(text string) int {
+	for i := 0; i < len(text); i++ {
+		b := text[i]
+		if b != '.' && b != '!' && b != '?' {
+			continue
+		}
+		end := i + 1
+		for end < len(text) && (text[end] == '.' || text[end] == '!' || text[end] == '?') {
+			end++
+		}
+		if end >= len(text) || text[end] == ' ' || text[end] == '\t' || text[end] == '\n' {
+			return end
+		}
+		i = end - 1
+	}
+	return -1
+}
+
+// splitSentences splits a completed response string into individual sentences.
+func splitSentences(text string) []string {
+	text = strings.TrimSpace(text)
+	if text == "" {
+		return nil
+	}
+	var sentences []string
+	for {
+		end := sentenceBoundary(text)
+		if end < 0 {
+			break
+		}
+		sentence := strings.TrimSpace(text[:end])
+		text = strings.TrimLeft(text[end:], " \t\n\r")
+		if len(sentence) >= 3 {
+			sentences = append(sentences, sentence)
+		}
+	}
+	if remainder := strings.TrimSpace(text); len(remainder) >= 3 {
+		sentences = append(sentences, remainder)
+	}
+	if len(sentences) == 0 && len(text) >= 3 {
+		return []string{text}
+	}
+	return sentences
 }
 
 // calculateRMS calculates the Root Mean Square of PCM samples

@@ -61,6 +61,15 @@ type Config struct {
 	// Voice activity detection: silence timeout in ms before processing speech
 	VADSilenceTimeoutMs int `yaml:"vad_silence_timeout_ms" json:"vad_silence_timeout_ms"`
 
+	// VAD ticker interval in ms: how often to scan for new audio packets.
+	// Shorter = faster end-of-speech detection (lower latency) but more CPU.
+	// Default 100ms. Reduce to 50ms for ultra-fast response, increase to 200ms+ for lower CPU.
+	VADTickerIntervalMs int `yaml:"vad_ticker_interval_ms" json:"vad_ticker_interval_ms"`
+
+	// VAD RMS threshold: frame energy above this counts as speech (0.0–1.0).
+	// Lower = more sensitive. Default 0.025 (~800/32768). Raise if background noise triggers false detections.
+	VADRMSThreshold float64 `yaml:"vad_rms_threshold" json:"vad_rms_threshold"`
+
 	// WebSocket port for the AI protocol handler
 	// Set to 0 to use the main server port
 	WSPort int `yaml:"ws_port" json:"ws_port"`
@@ -70,6 +79,10 @@ type Config struct {
 
 	// ASR language hint (e.g., "hu", "en", "auto"). Empty means auto-detect.
 	ASRLanguage string `yaml:"asr_language" json:"asr_language"`
+
+	// Brave Search API key for web_search tool (optional, free tier at search.brave.com)
+	// Without this key, web_search only uses DuckDuckGo instant answers.
+	BraveSearchAPIKey string `yaml:"brave_search_api_key" json:"brave_search_api_key"`
 }
 
 // DefaultConfig returns the default AI configuration for local Ollama setup
@@ -89,7 +102,9 @@ func DefaultConfig() Config {
 		EnableTTS:           true,
 		ContextMessages:     10,
 		StreamLLM:           true,
-		VADSilenceTimeoutMs: 1500,
+		VADSilenceTimeoutMs: 800,
+		VADTickerIntervalMs: 100,
+		VADRMSThreshold:     0.05,
 		WSPort:              0,
 		EnableMCPTools:      true,
 	}
@@ -129,7 +144,13 @@ func LoadConfig(path string) (Config, error) {
 		cfg.ContextMessages = 10
 	}
 	if cfg.VADSilenceTimeoutMs <= 0 {
-		cfg.VADSilenceTimeoutMs = 1500
+		cfg.VADSilenceTimeoutMs = 800
+	}
+	if cfg.VADTickerIntervalMs <= 0 {
+		cfg.VADTickerIntervalMs = 100
+	}
+	if cfg.VADRMSThreshold <= 0 {
+		cfg.VADRMSThreshold = 0.05
 	}
 
 	return cfg, nil
