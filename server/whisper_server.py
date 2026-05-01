@@ -1,21 +1,20 @@
 #!/usr/bin/env python3
 """
-Local Whisper ASR server using mlx-whisper (Apple Silicon / Metal GPU).
+Local Whisper ASR server using faster-whisper (CUDA / CPU).
 Exposes an OpenAI-compatible /v1/audio/transcriptions endpoint.
 
 Usage:
-    python3 whisper_server.py [--port 13000] [--model large-v3-turbo]
-
-Models: tiny, base, small, medium, large-v1, large-v2, large-v3, large-v3-turbo
+    python3 whisper_server.py [--port 13000] [--model large-v3] \\
+                              [--device cuda] [--compute-type float16]
 """
 
 import argparse
-import io
 import logging
-import tempfile
 import os
+import tempfile
+from typing import Optional
 
-import mlx_whisper
+from faster_whisper import WhisperModel
 from fastapi import FastAPI, HTTPException, Request
 
 logging.basicConfig(level=logging.INFO)
@@ -23,32 +22,12 @@ logger = logging.getLogger("whisper-server")
 
 app = FastAPI(title="Local Whisper ASR Server")
 
-model_path = None  # set at startup
-
-MLX_MODEL_MAP = {
-    "tiny":             "mlx-community/whisper-tiny-mlx-q4",
-    "base":             "mlx-community/whisper-base-mlx-q4",
-    "small":            "mlx-community/whisper-small-mlx-q4",
-    "medium":           "mlx-community/whisper-medium-mlx-q4",
-    "large-v1":         "mlx-community/whisper-large-v1-mlx",
-    "large-v2":         "mlx-community/whisper-large-v2-mlx",
-    "large-v3":         "mlx-community/whisper-large-v3-mlx",
-    "large-v3-turbo":   "mlx-community/whisper-large-v3-turbo",
-}
-
-
-def resolve_model(name: str) -> str:
-    if "/" in name:
-        return name  # already a HuggingFace repo id
-    resolved = MLX_MODEL_MAP.get(name)
-    if resolved is None:
-        raise ValueError(f"Unknown model '{name}'. Known: {list(MLX_MODEL_MAP)}")
-    return resolved
+model: Optional[WhisperModel] = None
 
 
 @app.post("/v1/audio/transcriptions")
 async def transcribe(request: Request):
-    if model_path is None:
+    if model is None:
         raise HTTPException(status_code=503, detail="Model not loaded")
 
     form = await request.form()
@@ -62,7 +41,6 @@ async def transcribe(request: Request):
         language = None
     task = form.get("task", "transcribe")
 
-    # mlx_whisper.transcribe needs a file path, not bytes
     suffix = ".wav"
     filename = getattr(audio_file, "filename", None)
     if filename:
@@ -75,44 +53,47 @@ async def transcribe(request: Request):
         tmp_path = tmp.name
 
     try:
-        result = mlx_whisper.transcribe(
+        segments, info = model.transcribe(
             tmp_path,
-            path_or_hf_repo=model_path,
-            temperature=0.0,
             language=language,
             task=task,
+            beam_size=5,
+            vad_filter=False,
         )
+        text = " ".join(seg.text for seg in segments).strip()
     finally:
         os.unlink(tmp_path)
 
-    text = result.get("text", "").strip()
-    detected_lang = result.get("language", language or "unknown")
-    logger.info(f"Transcribed ({detected_lang}): {text[:100]}")
+    detected_lang = info.language
+    logger.info(f"Transcribed ({detected_lang}, {info.duration:.2f}s): {text[:100]}")
 
     return {
         "text": text,
         "language": detected_lang,
-        "duration": result.get("duration", 0.0),
+        "duration": info.duration,
     }
 
 
 @app.get("/health")
 async def health():
-    return {"status": "ok", "model": model_path}
+    return {"status": "ok"}
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="Local Whisper ASR Server (mlx)")
+    parser = argparse.ArgumentParser(description="Local Whisper ASR Server (faster-whisper)")
     parser.add_argument("--port", type=int, default=13000)
-    parser.add_argument("--model", type=str, default="large-v3-turbo",
-                        help="Model name or HuggingFace repo id")
+    parser.add_argument("--model", type=str, default="large-v3",
+                        help="tiny, base, small, medium, large-v1, large-v2, large-v3, large-v3-turbo, "
+                             "or a HuggingFace repo id")
+    parser.add_argument("--device", type=str, default="cuda",
+                        choices=["cuda", "cpu", "auto"])
+    parser.add_argument("--compute-type", type=str, default="float16",
+                        help="float16 (cuda), int8_float16 (cuda, faster), int8 (cpu)")
     args = parser.parse_args()
 
-    model_path = resolve_model(args.model)
-    logger.info(f"Using mlx-whisper model: {model_path}")
-
-    # warm-up: mlx_whisper downloads/caches the model on first transcribe call
-    logger.info("Model will be downloaded on first request if not cached.")
+    logger.info(f"Loading {args.model} on {args.device} ({args.compute_type})...")
+    model = WhisperModel(args.model, device=args.device, compute_type=args.compute_type)
+    logger.info("Model loaded.")
 
     import uvicorn
     uvicorn.run(app, host="0.0.0.0", port=args.port)
