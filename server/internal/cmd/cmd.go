@@ -95,10 +95,14 @@ var (
 
 				// Build the OTA response JSON
 				// The ESP32 expects: { "firmware": {...}, "websocket": {...}, "server_time": {...} }
-				// Build local server URL for the device
-				localIP := "192.168.1.149"
-				otaUrl := fmt.Sprintf("http://%s:12800/xiaozhi/ota/", localIP)
-				wsUrl := fmt.Sprintf("ws://%s:12800/xiaozhi/ws", localIP)
+				// Derive host from the inbound request so URLs point back at whatever
+				// address the device used to reach us — no hardcoded IP needed.
+				host, _, splitErr := net.SplitHostPort(r.Host)
+				if splitErr != nil {
+					host = r.Host
+				}
+				otaUrl := fmt.Sprintf("http://%s:12800/xiaozhi/ota/", host)
+				wsUrl := fmt.Sprintf("ws://%s:12800/xiaozhi/ws", host)
 
 				otaResponse := map[string]interface{}{
 					"firmware": map[string]interface{}{
