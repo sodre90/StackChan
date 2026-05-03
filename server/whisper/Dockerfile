@@ -15,5 +15,5 @@ EXPOSE 13000
 CMD ["python3", "whisper_server.py", \
      "--model", "large-v3", \
      "--device", "cuda", \
-     "--compute-type", "float16", \
+     "--compute-type", "int8_float16", \
      "--port", "13000"]

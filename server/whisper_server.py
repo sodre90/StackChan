@@ -58,7 +58,7 @@ async def transcribe(request: Request):
             language=language,
             task=task,
             beam_size=5,
-            vad_filter=False,
+            vad_filter=True,
         )
         text = " ".join(seg.text for seg in segments).strip()
     finally:
