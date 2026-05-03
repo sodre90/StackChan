@@ -52,7 +52,7 @@ asr_language: "hu"
 #   Typical range: 0.01–0.1. Start at 0.05 and adjust based on your environment.
 vad_silence_timeout_ms: 800
 vad_ticker_interval_ms: 100
-vad_rms_threshold: 0.05
+vad_rms_threshold: 0.08
 
 # WebSocket port (0 = use main server port)
 ws_port: 0
