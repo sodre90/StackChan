@@ -9,7 +9,7 @@ namespace secret_logic {
 
 __attribute__((weak)) std::string get_server_url()
 {
-    return "http://192.168.1.149:65097";
+    return "http://192.168.88.50:12800";
 }
 
 __attribute__((weak)) std::string generate_auth_token()

@@ -492,10 +492,18 @@ vadLoop:
 	client.isListening = false
 	client.mu.Unlock()
 
+	if len(packets) == 0 {
+		logger.Debugf(ctx, "Packets already consumed by concurrent handler — skipping ASR")
+		return
+	}
+
 	// Trim leading silence: start from a few frames before speech onset so we
 	// don't clip the first phoneme (5 frames × 60ms = 300ms pre-buffer).
 	if speechStartIdx > speechPreBuffer {
 		startIdx := speechStartIdx - speechPreBuffer
+		if startIdx >= len(packets) {
+			startIdx = 0
+		}
 		logger.Debugf(ctx, "Trimming %d leading-silence packets (speech onset at packet %d)", startIdx, speechStartIdx)
 		packets = packets[startIdx:]
 	}

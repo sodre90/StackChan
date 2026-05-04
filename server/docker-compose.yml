@@ -8,27 +8,36 @@ services:
     volumes:
       - ./config.yaml:/app/config.yaml:ro
     depends_on:
+      - whisper
       - tts
     extra_hosts:
       - "host.docker.internal:host-gateway"
     restart: unless-stopped
 
-  # whisper runs natively (mlx-whisper on Apple Silicon) — see whisper_server.py
-  # whisper:
-  #   build:
-  #     context: .
-  #     dockerfile: whisper/Dockerfile
-  #   ports:
-  #     - "13000:13000"
-  #   volumes:
-  #     - whisper-models:/tmp/whisper-models
-  #   restart: unless-stopped
+  whisper:
+    build:
+      context: .
+      dockerfile: whisper/Dockerfile
+    ports:
+      - "13000:13000"
+    volumes:
+      - whisper-models:/root/.cache/huggingface
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+    restart: unless-stopped
 
   tts:
     build:
       context: .
-      dockerfile: tts/Dockerfile
+      dockerfile: piper/Dockerfile
     ports:
       - "14000:14000"
     restart: unless-stopped
 
+volumes:
+  whisper-models:
