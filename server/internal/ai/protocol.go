@@ -580,7 +580,11 @@ func processLLMResponse(ctx context.Context, client *AIClient, userText string) 
 
 	if !aiConfig.EnableMCPTools && aiConfig.StreamLLM {
 		// Sentence-streaming: LLM tokens feed into the accumulator; TTS fires per sentence.
-		fullResponse = streamLLMSentences(speakCtx, client)
+		if aiConfig.LLMProvider == "gemini" {
+			fullResponse = streamLLMSentencesGemini(speakCtx, client)
+		} else {
+			fullResponse = streamLLMSentences(speakCtx, client)
+		}
 	} else {
 		// Tools or non-streaming: get the complete response, then speak sentence by sentence.
 		fullResponse = callLLM(speakCtx, client)
@@ -937,6 +941,10 @@ func buildWavFile(pcmData []int16, sampleRate, channels, bitsPerSample int) []by
 
 // callLLM sends the transcribed text to the LLM and returns the response
 func callLLM(ctx context.Context, client *AIClient) string {
+	if aiConfig.LLMProvider == "gemini" {
+		return callLLMGemini(ctx, client)
+	}
+
 	if aiConfig.APIBaseURL == "" {
 		logger.Warning(ctx, "LLM API base URL not configured")
 		return ""

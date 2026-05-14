@@ -14,6 +14,9 @@ import (
 
 // Config holds the AI backend configuration for local OpenAI-compatible models
 type Config struct {
+	// LLM provider: "openai" (default, OpenAI-compatible) or "gemini" (Google Gemini API)
+	LLMProvider string `yaml:"llm_provider" json:"llm_provider"`
+
 	// OpenAI-compatible API base URL for LLM/TTS (e.g., http://localhost:11434/v1 for Ollama)
 	APIBaseURL string `yaml:"api_base_url" json:"api_base_url"`
 
