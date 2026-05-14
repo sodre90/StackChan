@@ -139,6 +139,12 @@ func LoadConfig(path string) (Config, error) {
 		return cfg, err
 	}
 
+	// Overlay additional_config.yaml (gitignored, for secrets like api_key)
+	additionalPath := filepath.Join(filepath.Dir(path), "additional_config.yaml")
+	if additionalData, err := os.ReadFile(additionalPath); err == nil {
+		_ = yaml.Unmarshal(additionalData, &cfg)
+	}
+
 	// Apply defaults for any zero values
 	if cfg.TTSResponseFormat == "" {
 		cfg.TTSResponseFormat = "opus"
