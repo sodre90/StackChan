@@ -83,6 +83,10 @@ type Config struct {
 	// ASR language hint (e.g., "hu", "en", "auto"). Empty means auto-detect.
 	ASRLanguage string `yaml:"asr_language" json:"asr_language"`
 
+	// ASR initial prompt: primes the Whisper decoder with expected vocabulary and orthography.
+	// Improves accuracy for specific languages, domain terms, or proper nouns.
+	ASRInitialPrompt string `yaml:"asr_initial_prompt" json:"asr_initial_prompt"`
+
 	// Brave Search API key for web_search tool (optional, free tier at search.brave.com)
 	// Without this key, web_search only uses DuckDuckGo instant answers.
 	BraveSearchAPIKey string `yaml:"brave_search_api_key" json:"brave_search_api_key"`

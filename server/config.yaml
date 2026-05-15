@@ -45,6 +45,10 @@ stream_llm: true
 # ASR language hint (forces Whisper to use this language instead of auto-detect)
 asr_language: "hu"
 
+# ASR initial prompt: primes Whisper decoder with expected vocabulary/orthography.
+# Greatly improves accuracy for Hungarian (gy, ny, sz, zs, cs, ű, ő, etc.)
+asr_initial_prompt: "Szia! Hogy vagy? Beszéljünk magyarul. StackChan egy kedves asztali robot. Kérlek, segíts nekem. Mennyi az idő? Milyen az időjárás Budapesten? Szeretnék zenét hallgatni. Köszönöm szépen!"
+
 # VAD (Voice Activity Detection) settings
 # vad_silence_timeout_ms: Wait this long after last speech before triggering ASR
 # vad_ticker_interval_ms: How often to scan for new audio packets (lower = faster detection)

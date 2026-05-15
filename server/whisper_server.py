@@ -40,6 +40,7 @@ async def transcribe(request: Request):
     if language == "auto":
         language = None
     task = form.get("task", "transcribe")
+    initial_prompt = form.get("prompt") or None
 
     suffix = ".wav"
     filename = getattr(audio_file, "filename", None)
@@ -59,6 +60,7 @@ async def transcribe(request: Request):
             task=task,
             beam_size=5,
             vad_filter=True,
+            initial_prompt=initial_prompt,
         )
         text = " ".join(seg.text for seg in segments).strip()
     finally:

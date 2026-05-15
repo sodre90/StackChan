@@ -61,6 +61,7 @@ async def transcribe(request: Request):
     if language == "auto":
         language = None
     task = form.get("task", "transcribe")
+    initial_prompt = form.get("prompt") or None
 
     # mlx_whisper.transcribe needs a file path, not bytes
     suffix = ".wav"
@@ -75,13 +76,15 @@ async def transcribe(request: Request):
         tmp_path = tmp.name
 
     try:
-        result = mlx_whisper.transcribe(
-            tmp_path,
+        kwargs = dict(
             path_or_hf_repo=model_path,
             temperature=0.0,
             language=language,
             task=task,
         )
+        if initial_prompt:
+            kwargs["initial_prompt"] = initial_prompt
+        result = mlx_whisper.transcribe(tmp_path, **kwargs)
     finally:
         os.unlink(tmp_path)
 

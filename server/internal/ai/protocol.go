@@ -830,6 +830,9 @@ func callASRAPI(ctx context.Context, wavData []byte, asrURL string) (string, err
 	if aiConfig.ASRLanguage != "" && aiConfig.ASRLanguage != "auto" {
 		mw.WriteField("language", aiConfig.ASRLanguage)
 	}
+	if aiConfig.ASRInitialPrompt != "" {
+		mw.WriteField("prompt", aiConfig.ASRInitialPrompt)
+	}
 	part, err := mw.CreateFormFile("file", "audio.wav")
 	if err != nil {
 		return "", fmt.Errorf("create form file: %w", err)
