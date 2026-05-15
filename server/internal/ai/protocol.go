@@ -401,7 +401,8 @@ func processASRAndLLM(ctx context.Context, client *AIClient, mode string) {
 	var seenSpeech bool
 	var lastSpeechAt time.Time
 	var vadPktIdx int
-	speechStartIdx := -1 // packet index where voice onset was first detected (-1 = not yet)
+	var speechTicks int    // number of VAD ticks that contained speech-level audio
+	speechStartIdx := -1   // packet index where voice onset was first detected (-1 = not yet)
 
 	silenceDuration := time.Duration(aiConfig.VADSilenceTimeoutMs) * time.Millisecond
 	if silenceDuration <= 0 {
@@ -438,6 +439,7 @@ vadLoop:
 			}
 			prevSpeechStartIdx := speechStartIdx
 			maxRmsInTick := 0.0
+			tickHadSpeech := false
 			for i, pkt := range allPkts[vadPktIdx:] {
 				n, err := vadDecoder.Decode(pkt, pcmBuf)
 				if err != nil || n == 0 {
@@ -449,11 +451,15 @@ vadLoop:
 				}
 				if rms > aiConfig.VADRMSThreshold {
 					if speechStartIdx < 0 {
-						speechStartIdx = vadPktIdx + i // record onset
+						speechStartIdx = vadPktIdx + i
 					}
 					seenSpeech = true
 					lastSpeechAt = time.Now()
+					tickHadSpeech = true
 				}
+			}
+			if tickHadSpeech {
+				speechTicks++
 			}
 			vadPktIdx = len(allPkts)
 
@@ -499,6 +505,12 @@ vadLoop:
 
 	if !seenSpeech {
 		logger.Debugf(ctx, "No speech detected by VAD, skipping ASR (%d packets discarded)", len(packets))
+		return
+	}
+
+	// Require at least 3 ticks (~300ms) of speech to filter out pops/clicks
+	if speechTicks < 3 {
+		logger.Debugf(ctx, "Speech too short (%d ticks), likely noise — skipping ASR", speechTicks)
 		return
 	}
 

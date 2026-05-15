@@ -47,7 +47,7 @@ asr_language: "hu"
 
 # ASR initial prompt: primes Whisper decoder with expected vocabulary/orthography.
 # Greatly improves accuracy for Hungarian (gy, ny, sz, zs, cs, ű, ő, etc.)
-asr_initial_prompt: "StackChan, Budapest, időjárás, hőmérséklet, köszönöm, kérlek, igen, nem, segítség, zene, tánc, szín, piros, kék, zöld, emlékeztető, mennyi, hány óra, jó reggelt, jó estét"
+asr_initial_prompt: "StackChan, Budapest, időjárás, hőmérséklet, kérlek, igen, nem, segítség, zene, tánc, szín, piros, kék, zöld, emlékeztető, mennyi, hány óra"
 
 # VAD (Voice Activity Detection) settings
 # vad_silence_timeout_ms: Wait this long after last speech before triggering ASR
