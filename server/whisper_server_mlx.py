@@ -81,6 +81,9 @@ async def transcribe(request: Request):
             temperature=0.0,
             language=language,
             task=task,
+            condition_on_previous_text=False,
+            compression_ratio_threshold=2.0,
+            no_speech_threshold=0.5,
         )
         if initial_prompt:
             kwargs["initial_prompt"] = initial_prompt

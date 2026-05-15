@@ -497,6 +497,11 @@ vadLoop:
 		return
 	}
 
+	if !seenSpeech {
+		logger.Debugf(ctx, "No speech detected by VAD, skipping ASR (%d packets discarded)", len(packets))
+		return
+	}
+
 	// Trim leading silence: start from a few frames before speech onset so we
 	// don't clip the first phoneme (5 frames × 60ms = 300ms pre-buffer).
 	if speechStartIdx > speechPreBuffer {
