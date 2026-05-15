@@ -3,11 +3,25 @@
 All StackChan server settings live in `server/config.yaml`.
 The file is hot-reloaded on server restart; no rebuild is needed.
 
+## Secrets: `additional_config.yaml`
+
+For API keys and other secrets, create `server/additional_config.yaml` (gitignored).
+It is automatically merged on top of `config.yaml` — any key set in the additional file overrides the main config.
+
+```yaml
+# server/additional_config.yaml (not committed to git)
+api_key: "your-secret-api-key"
+brave_search_api_key: "your-brave-key"
+```
+
+When running via Docker Compose, both files are bind-mounted into the container.
+
 ---
 
 ## LLM (Language Model)
 
 ```yaml
+llm_provider: "openai"
 api_base_url: "http://host.docker.internal:8000/v1"
 api_key: ""
 llm_model: "qwen2.5:7b"
@@ -16,21 +30,37 @@ stream_llm: true
 
 | Key | Type | Default | Description |
 |-----|------|---------|-------------|
-| `api_base_url` | string | — | OpenAI-compatible base URL for the LLM. Use `host.docker.internal` when running via Docker Compose. |
-| `api_key` | string | `""` | API key. Leave empty for local models (Ollama, vLLM, etc.). |
-| `llm_model` | string | — | Model name as it appears in the LLM server (e.g. `qwen2.5:7b`, `llama3.2:3b`). |
+| `llm_provider` | string | `"openai"` | LLM provider: `"openai"` (OpenAI-compatible APIs) or `"gemini"` (Google Gemini API). |
+| `api_base_url` | string | — | OpenAI-compatible base URL for the LLM. Ignored when `llm_provider` is `"gemini"`. Use `host.docker.internal` when running via Docker Compose. |
+| `api_key` | string | `""` | API key. For OpenAI-compatible: leave empty for local models. For Gemini: your Google AI Studio API key (required). Best placed in `additional_config.yaml`. |
+| `llm_model` | string | — | Model name. For OpenAI-compatible: as it appears in the LLM server (e.g. `qwen2.5:7b`). For Gemini: model ID (e.g. `gemini-2.0-flash`, `gemini-2.5-flash`). |
 | `stream_llm` | bool | `true` | Stream LLM tokens for faster first-sentence TTS. Disable if your LLM backend does not support streaming. |
 | `context_messages` | int | `10` | Number of recent conversation turns to keep in the LLM context window. Higher = better memory, higher latency. |
 
 ### Supported LLM backends
 
-| Backend | `api_base_url` | Notes |
-|---------|---------------|-------|
-| Ollama | `http://host.docker.internal:11434/v1` | Free, local, many models |
-| LM Studio | `http://host.docker.internal:1234/v1` | GUI model manager |
-| vLLM | `http://host.docker.internal:8000/v1` | GPU-accelerated |
-| OpenAI | `https://api.openai.com/v1` | Requires `api_key` |
-| Any OpenAI-compatible | custom URL | Set `api_key` if needed |
+| Backend | `llm_provider` | `api_base_url` | Notes |
+|---------|----------------|---------------|-------|
+| Ollama | `openai` | `http://host.docker.internal:11434/v1` | Free, local, many models |
+| llama.cpp | `openai` | `http://host.docker.internal:8000/v1` | Local, fast on Apple Silicon |
+| LM Studio | `openai` | `http://host.docker.internal:1234/v1` | GUI model manager |
+| vLLM | `openai` | `http://host.docker.internal:8000/v1` | GPU-accelerated |
+| OpenAI | `openai` | `https://api.openai.com/v1` | Requires `api_key` |
+| Google Gemini | `gemini` | *(ignored)* | Requires `api_key` from [Google AI Studio](https://aistudio.google.com/apikey) |
+| Any OpenAI-compatible | `openai` | custom URL | Set `api_key` if needed |
+
+### Gemini quick start
+
+1. Get a free API key at [Google AI Studio](https://aistudio.google.com/apikey)
+2. Set in `config.yaml`:
+   ```yaml
+   llm_provider: "gemini"
+   llm_model: "gemini-2.0-flash"
+   ```
+3. Set in `additional_config.yaml`:
+   ```yaml
+   api_key: "AIzaSy..."
+   ```
 
 ---
 
@@ -193,9 +223,12 @@ The main server always listens on port **12800**. Change the host-side binding i
 
 ---
 
-## Complete example
+## Complete examples
+
+### Local LLM (OpenAI-compatible)
 
 ```yaml
+llm_provider: "openai"
 api_base_url: "http://host.docker.internal:8000/v1"
 asr_base_url: "http://whisper:13000/v1"
 tts_base_url: "http://tts:14000/v1"
@@ -221,5 +254,35 @@ vad_rms_threshold: 0.05
 
 ws_port: 0
 enable_mcp_tools: true
-brave_search_api_key: ""
+```
+
+### Google Gemini
+
+```yaml
+llm_provider: "gemini"
+llm_model: "gemini-2.0-flash"
+# api_key goes in additional_config.yaml
+
+asr_base_url: "http://host.docker.internal:13000/v1"
+tts_base_url: "http://tts:14000/v1"
+
+asr_model: "whisper"
+tts_model: "piper"
+tts_voice: "en-US-AvaNeural"
+tts_response_format: "opus"
+
+system_prompt: "You are StackChan, a cute AI desktop robot. Be friendly, helpful, and concise. Keep responses under 30 words. Speak in English."
+
+enable_asr: true
+enable_tts: true
+context_messages: 10
+stream_llm: true
+
+asr_language: "en"
+vad_silence_timeout_ms: 800
+vad_ticker_interval_ms: 100
+vad_rms_threshold: 0.05
+
+ws_port: 0
+enable_mcp_tools: true
 ```
