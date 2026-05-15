@@ -626,6 +626,11 @@ func processLLMResponse(ctx context.Context, client *AIClient, userText string) 
 
 	addMessageToContext(ctx, client, "assistant", fullResponse)
 
+	// Wait for the device to finish playing the last audio frames.
+	// Frames are sent faster than realtime (20ms intervals for 60ms frames),
+	// so the device is still playing when we reach this point.
+	time.Sleep(500 * time.Millisecond)
+
 	client.mu.Lock()
 	client.ttsEndedAt = time.Now()
 	client.mu.Unlock()
