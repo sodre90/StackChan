@@ -503,14 +503,14 @@ vadLoop:
 		return
 	}
 
-	if !seenSpeech {
-		logger.Debugf(ctx, "No speech detected by VAD, skipping ASR (%d packets discarded)", len(packets))
-		return
-	}
-
-	// Require at least 3 ticks (~300ms) of speech to filter out pops/clicks
-	if speechTicks < 3 {
-		logger.Debugf(ctx, "Speech too short (%d ticks), likely noise — skipping ASR", speechTicks)
+	if !seenSpeech || speechTicks < 3 {
+		if !seenSpeech {
+			logger.Debugf(ctx, "No speech detected by VAD, skipping ASR (%d packets discarded)", len(packets))
+		} else {
+			logger.Debugf(ctx, "Speech too short (%d ticks), likely noise — skipping ASR", speechTicks)
+		}
+		sendTTS(ctx, client, "start", "")
+		sendTTS(ctx, client, "stop", "")
 		return
 	}
 
