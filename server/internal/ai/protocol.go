@@ -37,7 +37,7 @@ const (
 
 	// Audio processing constants
 	maxAudioBufferSize = 5 * 1024 * 1024 // 5MB max buffer
-	opusFrameDelayMs   = 20              // ms between Opus frames (frames are 60ms; lower than frame duration to build device-side buffer and avoid playback stutter)
+	opusFrameDelayMs   = 40              // ms between Opus frames (frames are 60ms; ~1.5x realtime to gently build device-side buffer without overwhelming the ESP32)
 
 	// VAD — inline RMS-based detector in processASRAndLLM.
 	// speechPreBuffer: packets kept before detected onset to avoid clipping first phoneme.
