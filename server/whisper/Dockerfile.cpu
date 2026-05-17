@@ -17,5 +17,5 @@ EXPOSE 13000
 CMD ["python3", "whisper_server.py", \
      "--model", "sarpba/whisper-base-hungarian_v1", \
      "--device", "cpu", \
-     "--compute-type", "int8", \
+     "--compute-type", "float32", \
      "--port", "13000"]
