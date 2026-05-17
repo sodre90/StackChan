@@ -157,6 +157,38 @@ func extractGeminiFunctionCalls(result map[string]interface{}) []map[string]inte
 	return calls
 }
 
+// extractGeminiFunctionCallParts returns full part objects for any functionCall parts,
+// preserving fields like thought_signature that Gemini requires on follow-up requests.
+func extractGeminiFunctionCallParts(result map[string]interface{}) []map[string]interface{} {
+	candidates, ok := result["candidates"].([]interface{})
+	if !ok || len(candidates) == 0 {
+		return nil
+	}
+	candidate, ok := candidates[0].(map[string]interface{})
+	if !ok {
+		return nil
+	}
+	content, ok := candidate["content"].(map[string]interface{})
+	if !ok {
+		return nil
+	}
+	parts, ok := content["parts"].([]interface{})
+	if !ok {
+		return nil
+	}
+	var calls []map[string]interface{}
+	for _, p := range parts {
+		part, ok := p.(map[string]interface{})
+		if !ok {
+			continue
+		}
+		if _, ok := part["functionCall"].(map[string]interface{}); ok {
+			calls = append(calls, part)
+		}
+	}
+	return calls
+}
+
 func extractGeminiModelContent(result map[string]interface{}) map[string]interface{} {
 	candidates, ok := result["candidates"].([]interface{})
 	if !ok || len(candidates) == 0 {
@@ -416,7 +448,8 @@ func streamLLMSentencesGemini(ctx context.Context, client *AIClient) string {
 		}
 
 		var acc sentenceAccumulator
-		var funcCalls []map[string]interface{}
+		// funcCallParts stores full part objects so thought_signature is preserved.
+		var funcCallParts []map[string]interface{}
 
 		scanner := bufio.NewScanner(resp.Body)
 		scanner.Buffer(make([]byte, 1024*1024), 1024*1024)
@@ -438,8 +471,8 @@ func streamLLMSentencesGemini(ctx context.Context, client *AIClient) string {
 				}
 			}
 
-			if calls := extractGeminiFunctionCalls(chunk); len(calls) > 0 {
-				funcCalls = append(funcCalls, calls...)
+			if parts := extractGeminiFunctionCallParts(chunk); len(parts) > 0 {
+				funcCallParts = append(funcCallParts, parts...)
 			}
 		}
 
@@ -453,7 +486,7 @@ func streamLLMSentencesGemini(ctx context.Context, client *AIClient) string {
 		}
 
 		// No tool calls — we're done.
-		if len(funcCalls) == 0 {
+		if len(funcCallParts) == 0 {
 			break
 		}
 
@@ -461,10 +494,11 @@ func streamLLMSentencesGemini(ctx context.Context, client *AIClient) string {
 		// gets the full tool context without a slow non-streaming round trip.
 		var modelParts []map[string]interface{}
 		var toolResponseParts []map[string]interface{}
-		for _, fc := range funcCalls {
+		for _, part := range funcCallParts {
+			fc, _ := part["functionCall"].(map[string]interface{})
 			toolName, _ := fc["name"].(string)
 			toolArgs, _ := fc["args"].(map[string]interface{})
-			modelParts = append(modelParts, map[string]interface{}{"functionCall": fc})
+			modelParts = append(modelParts, part) // full part preserves thought_signature
 
 			logger.Infof(ctx, "Gemini tool call: %s args=%v", toolName, toolArgs)
 			toolResult, err := mcpManager.CallTool(ctx, client, toolName, toolArgs)
