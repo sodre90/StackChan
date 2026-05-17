@@ -2,7 +2,7 @@ FROM python:3.12-slim
 
 # Runtime deps + build deps for ctranslate2
 RUN apt-get update && apt-get install -y --no-install-recommends \
-        ffmpeg cmake g++ git libopenblas-dev \
+        ffmpeg cmake make g++ git libopenblas-dev \
     && rm -rf /var/lib/apt/lists/*
 
 # Build ctranslate2 from source with AVX-512 BF16 kernels.
