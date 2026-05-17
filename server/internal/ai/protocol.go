@@ -474,10 +474,6 @@ vadLoop:
 				sendLLM(ctx, client, "thinking", "")
 			}
 
-			// Log max RMS each tick for debugging VAD sensitivity
-			if maxRmsInTick > 0 {
-				logger.Debugf(ctx, "Server VAD tick: maxRMS=%.4f threshold=%.4f seenSpeech=%v silence=%.0fms", maxRmsInTick, aiConfig.VADRMSThreshold, seenSpeech, time.Since(lastSpeechAt).Milliseconds())
-			}
 
 			if seenSpeech && !lastSpeechAt.IsZero() && time.Since(lastSpeechAt) >= silenceDuration {
 				logger.Debugf(ctx, "Server VAD: speech ended (%.0fms silence), triggering ASR", time.Since(lastSpeechAt).Seconds()*1000)
@@ -619,6 +615,7 @@ func processLLMResponse(ctx context.Context, client *AIClient, userText string) 
 
 	var fullResponse string
 
+	llmStart := time.Now()
 	if aiConfig.StreamLLM {
 		// Sentence-streaming: LLM tokens feed into the accumulator; TTS fires per sentence.
 		if aiConfig.LLMProvider == "gemini" {
@@ -642,6 +639,8 @@ func processLLMResponse(ctx context.Context, client *AIClient, userText string) 
 			}
 		}
 	}
+
+	logger.Infof(speakCtx, "LLM latency: %.0fms", float64(time.Since(llmStart).Milliseconds()))
 
 	if fullResponse == "" {
 		sendTTS(ctx, client, "stop", "")
@@ -847,8 +846,10 @@ func transcribeAudio(ctx context.Context, client *AIClient, packets [][]byte) st
 
 	// Send to ASR — only retry on transient HTTP errors, not on empty transcription
 	for attempt := 0; attempt < maxRetries; attempt++ {
+		asrStart := time.Now()
 		text, err := callASRAPI(ctx, wavData, asrURL)
 		if err == nil {
+			logger.Infof(ctx, "ASR latency: %.0fms → %q", float64(time.Since(asrStart).Milliseconds()), text)
 			return text // empty string means no speech detected — caller handles this
 		}
 		if attempt < maxRetries-1 {
@@ -1379,6 +1380,7 @@ func generateSpeech(ctx context.Context, text string) []byte {
 	}
 
 	httpClient := &http.Client{Timeout: 60 * time.Second}
+	ttsStart := time.Now()
 	resp, err := httpClient.Do(req)
 	if err != nil {
 		logger.Errorf(ctx, "TTS request failed: %v", err)
@@ -1398,8 +1400,7 @@ func generateSpeech(ctx context.Context, text string) []byte {
 		return nil
 	}
 
-	logger.Infof(ctx, "Generated TTS audio: %d bytes (format: %s) for text: %s",
-		len(audioData), aiConfig.TTSResponseFormat, text)
+	logger.Infof(ctx, "TTS latency: %.0fms → %d bytes for %q", float64(time.Since(ttsStart).Milliseconds()), len(audioData), text)
 	return audioData
 }
 
