@@ -20,7 +20,7 @@ services:
   whisper:
     build:
       context: .
-      dockerfile: wav2vec2/Dockerfile
+      dockerfile: whisper/Dockerfile.cpu
     ports:
       - "13000:13000"
     volumes:
