@@ -911,6 +911,9 @@ func (m *MCPManager) handleWebSearch(ctx context.Context, client *AIClient, args
 		if err == nil && result != "" {
 			return result, nil
 		}
+		if err != nil {
+			logger.Warningf(ctx, "Brave Search failed, falling back to DuckDuckGo: %v", err)
+		}
 	}
 
 	// DuckDuckGo Instant Answer — free, no key, works for factual queries
@@ -929,8 +932,11 @@ func braveSearch(ctx context.Context, apiKey, query string) (string, error) {
 		return "", err
 	}
 	req.Header.Set("Accept", "application/json")
-	req.Header.Set("Accept-Encoding", "gzip")
 	req.Header.Set("X-Subscription-Token", apiKey)
+	// Note: don't set Accept-Encoding manually. Go's transport auto-negotiates
+	// gzip and transparently decompresses only when *it* set the header. A
+	// manual "Accept-Encoding: gzip" gives back the raw gzipped body, which
+	// json.Unmarshal then silently fails on — the key looks "not loaded".
 
 	resp, err := (&http.Client{Timeout: 10 * time.Second}).Do(req)
 	if err != nil {
@@ -939,7 +945,8 @@ func braveSearch(ctx context.Context, apiKey, query string) (string, error) {
 	defer resp.Body.Close()
 
 	if resp.StatusCode != 200 {
-		return "", fmt.Errorf("Brave Search returned %d", resp.StatusCode)
+		body, _ := io.ReadAll(resp.Body)
+		return "", fmt.Errorf("Brave Search returned %d: %s", resp.StatusCode, string(body))
 	}
 
 	body, err := io.ReadAll(resp.Body)
