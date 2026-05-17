@@ -6,6 +6,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 WORKDIR /app
 RUN pip3 install --no-cache-dir \
+        torch --index-url https://download.pytorch.org/whl/cpu
+RUN pip3 install --no-cache-dir \
         "faster-whisper>=1.0.3" \
         "transformers>=4.40.0" \
         fastapi uvicorn pydantic python-multipart
