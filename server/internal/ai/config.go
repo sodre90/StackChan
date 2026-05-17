@@ -90,6 +90,12 @@ type Config struct {
 	// Brave Search API key for web_search tool (optional, free tier at search.brave.com)
 	// Without this key, web_search only uses DuckDuckGo instant answers.
 	BraveSearchAPIKey string `yaml:"brave_search_api_key" json:"brave_search_api_key"`
+
+	// Home Assistant URL (e.g., http://homeassistant.local:8123)
+	HAUrl string `yaml:"ha_url" json:"ha_url"`
+
+	// Home Assistant long-lived access token
+	HAToken string `yaml:"ha_token" json:"ha_token"`
 }
 
 // DefaultConfig returns the default AI configuration for local Ollama setup

@@ -50,6 +50,8 @@ type MCPManager struct {
 	deviceMu      sync.RWMutex
 	devices       map[string]*DeviceState // mac -> device state
 	braveAPIKey   string
+	haURL         string
+	haToken       string
 }
 
 // DeviceState tracks the state of an ESP32 device
@@ -70,15 +72,13 @@ type DeviceState struct {
 }
 
 // NewMCPManager creates a new MCP tool manager
-func NewMCPManager(braveAPIKey ...string) *MCPManager {
-	key := ""
-	if len(braveAPIKey) > 0 {
-		key = braveAPIKey[0]
-	}
+func NewMCPManager(cfg Config) *MCPManager {
 	m := &MCPManager{
 		tools:       make(map[string]*MCPTool),
 		devices:     make(map[string]*DeviceState),
-		braveAPIKey: key,
+		braveAPIKey: cfg.BraveSearchAPIKey,
+		haURL:       strings.TrimRight(cfg.HAUrl, "/"),
+		haToken:     cfg.HAToken,
 	}
 
 	// Register default robot control tools
@@ -108,7 +108,7 @@ func NewMCPManager(braveAPIKey ...string) *MCPManager {
 
 	m.RegisterTool(MCPTool{
 		Name:        "robot.set_led_color",
-		Description: "Set the RGB LED color of the robot. Values are 0-255 for each channel.",
+		Description: "Set the tiny RGB indicator LED on the robot device itself. This is NOT a room light — only use for the robot's own LED. Values are 0-255 for each channel.",
 		Parameters: map[string]interface{}{
 			"type": "object",
 			"properties": map[string]interface{}{
@@ -233,6 +233,10 @@ func NewMCPManager(braveAPIKey ...string) *MCPManager {
 		},
 		Handler: m.handleWebSearch,
 	})
+
+	if m.haURL != "" && m.haToken != "" {
+		m.registerHomeAssistantTools()
+	}
 
 	return m
 }
