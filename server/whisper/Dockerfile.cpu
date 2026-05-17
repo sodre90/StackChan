@@ -15,7 +15,7 @@ RUN git clone --depth 1 --recurse-submodules --shallow-submodules \
     cmake -B /tmp/ct2-build /tmp/ct2 \
         -DWITH_MKL=OFF -DWITH_OPENBLAS=ON \
         -DOPENMP_RUNTIME=COMP \
-        -DCMAKE_CXX_FLAGS="-mavx512f -mavx512bf16" \
+        -DCMAKE_CXX_FLAGS="-march=native -O3" \
         -DCMAKE_INSTALL_PREFIX=/usr/local \
         -DBUILD_TESTS=OFF -DBUILD_BINARIES=OFF && \
     cmake --build /tmp/ct2-build -j$(nproc) && \
