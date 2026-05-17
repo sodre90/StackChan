@@ -56,8 +56,10 @@ stream_llm: true
 asr_language: "hu"
 
 # ASR initial prompt: primes Whisper decoder with expected vocabulary/orthography.
-# Greatly improves accuracy for Hungarian (gy, ny, sz, zs, cs, ű, ő, etc.)
-asr_initial_prompt: "StackChan, Budapest, időjárás, hőmérséklet, kérlek, igen, nem, segítség, zene, tánc, szín, piros, kék, zöld, emlékeztető, mennyi, hány óra"
+# Disabled — whisper-base-hungarian is already fine-tuned for Hungarian and the
+# vocabulary list causes it to collapse to "." outputs (the prompt confuses the
+# small base model). Re-enable only for larger Whisper models that benefit from priming.
+asr_initial_prompt: ""
 
 # VAD (Voice Activity Detection) settings
 # vad_silence_timeout_ms: Wait this long after last speech before triggering ASR
