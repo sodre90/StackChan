@@ -396,6 +396,41 @@ func streamLLMSentencesGemini(ctx context.Context, client *AIClient) string {
 	var assembled strings.Builder
 	httpClient := &http.Client{Timeout: 60 * time.Second}
 
+	// TTS pipeline: generate audio concurrently with playback so inter-sentence
+	// gaps equal max(0, TTS_time - play_time) instead of TTS_time + play_time.
+	type ttsJob struct {
+		sentence string
+		audio    []byte
+	}
+	sentenceCh := make(chan string, 8)
+	resultCh := make(chan ttsJob, 8)
+	playerDone := make(chan struct{})
+
+	// Stage 1: generate TTS for each sentence as soon as text is available.
+	go func() {
+		for s := range sentenceCh {
+			var audio []byte
+			if aiConfig.EnableTTS {
+				audio = generateSpeech(ctx, s)
+			}
+			resultCh <- ttsJob{sentence: s, audio: audio}
+		}
+		close(resultCh)
+	}()
+
+	// Stage 2: play audio in order; runs concurrently with TTS generation.
+	go func() {
+		defer close(playerDone)
+		for job := range resultCh {
+			if ctx.Err() != nil {
+				continue // drain so the generator goroutine can exit
+			}
+			if len(job.audio) > 0 {
+				sendAudioChunks(ctx, client, job.audio)
+			}
+		}
+	}()
+
 	speak := func(sentence string) {
 		if ctx.Err() != nil {
 			return
@@ -407,11 +442,7 @@ func streamLLMSentencesGemini(ctx context.Context, client *AIClient) string {
 		assembled.WriteString(sentence)
 		assembled.WriteByte(' ')
 		sendTTS(ctx, client, "sentence_start", sentence)
-		if aiConfig.EnableTTS {
-			if audio := generateSpeech(ctx, sentence); len(audio) > 0 {
-				sendAudioChunks(ctx, client, audio)
-			}
-		}
+		sentenceCh <- sentence
 	}
 
 	for iteration := 0; iteration < 5; iteration++ {
@@ -562,6 +593,10 @@ func streamLLMSentencesGemini(ctx context.Context, client *AIClient) string {
 			map[string]interface{}{"role": "function", "parts": toolResponseParts},
 		)
 	}
+
+	// Drain the TTS pipeline and wait for all audio to finish playing.
+	close(sentenceCh)
+	<-playerDone
 
 	response := strings.TrimSpace(assembled.String())
 	if response != "" {
