@@ -98,7 +98,7 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
     logger.info(f"Loading {args.model} on {args.device} ({args.compute_type})...")
-    model = WhisperModel(args.model, device=args.device, compute_type=args.compute_type)
+    model = WhisperModel(args.model, device=args.device, compute_type=args.compute_type, cpu_threads=16)
 
     if args.feature_size is not None:
         from faster_whisper.feature_extractor import FeatureExtractor
