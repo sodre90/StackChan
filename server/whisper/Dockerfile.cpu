@@ -8,14 +8,19 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 # Build ctranslate2 from source with AVX-512 BF16 kernels.
 # The PyPI wheel targets AVX2 baseline and lacks BF16 SIMD — building from
 # source with -mavx512bf16 compiles the BF16 kernels in.
+# Two-step: first build+install the C++ library, then the Python bindings.
 RUN git clone --depth 1 --recurse-submodules --shallow-submodules \
         --branch v4.7.1 \
         https://github.com/OpenNMT/CTranslate2 /tmp/ct2 && \
-    cd /tmp/ct2/python && \
-    CXXFLAGS="-mavx512f -mavx512bf16" \
-    CMAKE_ARGS="-DWITH_MKL=OFF -DWITH_OPENBLAS=ON" \
-    pip install --no-cache-dir . && \
-    rm -rf /tmp/ct2
+    cmake -B /tmp/ct2-build /tmp/ct2 \
+        -DWITH_MKL=OFF -DWITH_OPENBLAS=ON \
+        -DCMAKE_CXX_FLAGS="-mavx512f -mavx512bf16" \
+        -DCMAKE_INSTALL_PREFIX=/usr/local \
+        -DBUILD_TESTS=OFF -DBUILD_BINARIES=OFF && \
+    cmake --build /tmp/ct2-build -j$(nproc) && \
+    cmake --install /tmp/ct2-build && \
+    pip install --no-cache-dir --no-build-isolation /tmp/ct2/python && \
+    rm -rf /tmp/ct2 /tmp/ct2-build
 
 WORKDIR /app
 RUN pip3 install --no-cache-dir \
