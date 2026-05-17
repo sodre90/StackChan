@@ -58,7 +58,7 @@ async def transcribe(request: Request):
             tmp_path,
             language=language,
             task=task,
-            beam_size=5,
+            beam_size=10,
             vad_filter=True,
             initial_prompt=initial_prompt,
         )
