@@ -60,6 +60,9 @@ func buildGeminiRequest(systemPrompt string, contextMessages []map[string]interf
 		"generationConfig": map[string]interface{}{
 			"temperature":     0.7,
 			"maxOutputTokens": 512,
+			"thinkingConfig": map[string]interface{}{
+				"thinkingBudget": 0,
+			},
 		},
 	}
 	if sysInst != nil {
