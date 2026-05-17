@@ -437,6 +437,9 @@ func streamLLMSentencesGemini(ctx context.Context, client *AIClient) string {
 		}
 		req.Header.Set("Content-Type", "application/json")
 
+		iterStart := time.Now()
+		logger.Debugf(ctx, "Gemini stream iter=%d sending request", iteration)
+
 		resp, err := httpClient.Do(req)
 		if err != nil {
 			logger.Errorf(ctx, "Gemini streaming request failed: %v", err)
@@ -453,6 +456,8 @@ func streamLLMSentencesGemini(ctx context.Context, client *AIClient) string {
 		var acc sentenceAccumulator
 		// funcCallParts stores full part objects so thought_signature is preserved.
 		var funcCallParts []map[string]interface{}
+		var firstTokenAt time.Time
+		var chunkCount int
 
 		scanner := bufio.NewScanner(resp.Body)
 		scanner.Buffer(make([]byte, 1024*1024), 1024*1024)
@@ -467,14 +472,23 @@ func streamLLMSentencesGemini(ctx context.Context, client *AIClient) string {
 			if err := json.Unmarshal([]byte(data), &chunk); err != nil {
 				continue
 			}
+			chunkCount++
 
 			if text := extractGeminiText(chunk); text != "" {
+				if firstTokenAt.IsZero() {
+					firstTokenAt = time.Now()
+					logger.Debugf(ctx, "Gemini stream iter=%d TTFT=%.0fms", iteration, float64(time.Since(iterStart).Milliseconds()))
+				}
 				for _, sentence := range acc.feed(text) {
 					speak(sentence)
 				}
 			}
 
 			if parts := extractGeminiFunctionCallParts(chunk); len(parts) > 0 {
+				if firstTokenAt.IsZero() {
+					firstTokenAt = time.Now()
+					logger.Debugf(ctx, "Gemini stream iter=%d first tool call chunk TTFT=%.0fms", iteration, float64(time.Since(iterStart).Milliseconds()))
+				}
 				funcCallParts = append(funcCallParts, parts...)
 			}
 		}
@@ -483,6 +497,10 @@ func streamLLMSentencesGemini(ctx context.Context, client *AIClient) string {
 			logger.Errorf(ctx, "Gemini streaming error: %v", err)
 		}
 		resp.Body.Close()
+
+		streamDuration := time.Since(iterStart)
+		logger.Debugf(ctx, "Gemini stream iter=%d done: chunks=%d tools=%d total=%.0fms",
+			iteration, chunkCount, len(funcCallParts), float64(streamDuration.Milliseconds()))
 
 		if remainder := acc.drain(); remainder != "" {
 			speak(remainder)
@@ -503,12 +521,13 @@ func streamLLMSentencesGemini(ctx context.Context, client *AIClient) string {
 			toolArgs, _ := fc["args"].(map[string]interface{})
 			modelParts = append(modelParts, part) // full part preserves thought_signature
 
-			logger.Infof(ctx, "Gemini tool call: %s args=%v", toolName, toolArgs)
+			toolStart := time.Now()
+			logger.Debugf(ctx, "Gemini tool call: %s args=%v", toolName, toolArgs)
 			toolResult, err := mcpManager.CallTool(ctx, client, toolName, toolArgs)
 			if err != nil {
 				toolResult = fmt.Sprintf("Error: %v", err)
 			}
-			logger.Infof(ctx, "Tool %s result: %s", toolName, toolResult)
+			logger.Debugf(ctx, "Tool %s result (%.0fms): %s", toolName, float64(time.Since(toolStart).Milliseconds()), toolResult)
 
 			toolResponseParts = append(toolResponseParts, map[string]interface{}{
 				"functionResponse": map[string]interface{}{
