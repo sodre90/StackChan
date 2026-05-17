@@ -9,11 +9,13 @@ RUN pip3 install --no-cache-dir \
         "faster-whisper>=1.0.3" \
         fastapi uvicorn pydantic python-multipart
 
+ENV CT2_FORCE_CPU_ISA=AVX512
+
 COPY whisper_server.py .
 EXPOSE 13000
 CMD ["python3", "whisper_server.py", \
      "--model", "Maxdorger29/whisper-large-v3-turbo-hungarian-lora", \
      "--device", "cpu", \
-     "--compute-type", "int8_float32", \
+     "--compute-type", "int8_bfloat16", \
      "--feature-size", "128", \
      "--port", "13000"]
