@@ -102,10 +102,10 @@ if __name__ == "__main__":
                              args.model.replace("/", "__"))
     if not os.path.exists(os.path.join(ct2_cache, "model.bin")):
         try:
-            from ctranslate2.converters import WhisperConverter
+            from ctranslate2.converters import TransformersConverter
             logger.info(f"Converting {args.model} to CTranslate2 format → {ct2_cache}")
-            WhisperConverter(args.model).convert(ct2_cache, quantization=args.compute_type,
-                                                 force=True)
+            TransformersConverter(args.model, low_cpu_mem_usage=True).convert(
+                ct2_cache, quantization=args.compute_type, force=True)
             model_path = ct2_cache
             logger.info("Conversion done.")
         except Exception as e:
