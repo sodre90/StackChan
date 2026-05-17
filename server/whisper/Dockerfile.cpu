@@ -14,6 +14,6 @@ EXPOSE 13000
 CMD ["python3", "whisper_server.py", \
      "--model", "Maxdorger29/whisper-large-v3-turbo-hungarian-lora", \
      "--device", "cpu", \
-     "--compute-type", "int8", \
+     "--compute-type", "float32", \
      "--feature-size", "128", \
      "--port", "13000"]
