@@ -1,19 +1,34 @@
 FROM python:3.12-slim
 
+# Runtime deps + build deps for ctranslate2
 RUN apt-get update && apt-get install -y --no-install-recommends \
-        ffmpeg \
+        ffmpeg cmake g++ git libopenblas-dev \
     && rm -rf /var/lib/apt/lists/*
+
+# Build ctranslate2 from source with AVX-512 BF16 kernels.
+# The PyPI wheel targets AVX2 baseline and lacks BF16 SIMD — building from
+# source with -mavx512bf16 compiles the BF16 kernels in.
+RUN git clone --depth 1 --recurse-submodules --shallow-submodules \
+        --branch v4.7.1 \
+        https://github.com/OpenNMT/CTranslate2 /tmp/ct2 && \
+    cd /tmp/ct2 && \
+    CXXFLAGS="-mavx512f -mavx512bf16" \
+    CMAKE_ARGS="-DWITH_MKL=OFF -DWITH_OPENBLAS=ON" \
+    pip install --no-cache-dir . && \
+    rm -rf /tmp/ct2
 
 WORKDIR /app
 RUN pip3 install --no-cache-dir \
         "faster-whisper>=1.0.3" \
         fastapi uvicorn pydantic python-multipart
 
+ENV CT2_FORCE_CPU_ISA=AVX512
+
 COPY whisper_server.py .
 EXPOSE 13000
 CMD ["python3", "whisper_server.py", \
      "--model", "Maxdorger29/whisper-large-v3-turbo-hungarian-lora", \
      "--device", "cpu", \
-     "--compute-type", "int8_float32", \
+     "--compute-type", "int8_bfloat16", \
      "--feature-size", "128", \
      "--port", "13000"]
