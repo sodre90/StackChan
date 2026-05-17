@@ -91,10 +91,19 @@ if __name__ == "__main__":
                         choices=["cuda", "cpu", "auto"])
     parser.add_argument("--compute-type", type=str, default="float16",
                         help="float16 (cuda), int8_float16 (cuda, faster), int8 (cpu)")
+    parser.add_argument("--feature-size", type=int, default=None,
+                        help="Override mel filterbank size (80 for old models, 128 for large-v3+). "
+                             "Auto-detected when omitted.")
     args = parser.parse_args()
 
     logger.info(f"Loading {args.model} on {args.device} ({args.compute_type})...")
     model = WhisperModel(args.model, device=args.device, compute_type=args.compute_type)
+
+    if args.feature_size is not None:
+        from faster_whisper.feature_extractor import FeatureExtractor
+        model.feature_extractor = FeatureExtractor(feature_size=args.feature_size)
+        logger.info(f"Feature extractor overridden: {args.feature_size} mel bins")
+
     logger.info("Model loaded.")
 
     import uvicorn
