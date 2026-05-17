@@ -350,35 +350,16 @@ func streamLLMSentencesGemini(ctx context.Context, client *AIClient) string {
 	contextMessages := getContextMessages(ctx, client)
 	requestBody := buildGeminiRequest(systemPrompt, contextMessages)
 
-	bodyBytes, err := json.Marshal(requestBody)
-	if err != nil {
-		logger.Errorf(ctx, "Failed to marshal Gemini request: %v", err)
-		return ""
+	// Include tool declarations when MCP is enabled so tool calls work in streaming mode.
+	var toolDecls interface{}
+	if aiConfig.EnableMCPTools && mcpManager != nil {
+		toolDecls = geminiToolDeclarations()
 	}
 
-	req, err := http.NewRequestWithContext(ctx, "POST", geminiStreamURL(), bytes.NewReader(bodyBytes))
-	if err != nil {
-		logger.Errorf(ctx, "Failed to create Gemini request: %v", err)
-		return ""
-	}
-	req.Header.Set("Content-Type", "application/json")
+	contents, _ := requestBody["contents"].([]map[string]interface{})
 
-	httpClient := &http.Client{Timeout: 60 * time.Second}
-	resp, err := httpClient.Do(req)
-	if err != nil {
-		logger.Errorf(ctx, "Gemini streaming request failed: %v", err)
-		return ""
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		body, _ := io.ReadAll(resp.Body)
-		logger.Errorf(ctx, "Gemini streaming API error (status %d): %s", resp.StatusCode, string(body))
-		return ""
-	}
-
-	var acc sentenceAccumulator
 	var assembled strings.Builder
+	httpClient := &http.Client{Timeout: 60 * time.Second}
 
 	speak := func(sentence string) {
 		if ctx.Err() != nil {
@@ -398,36 +379,111 @@ func streamLLMSentencesGemini(ctx context.Context, client *AIClient) string {
 		}
 	}
 
-	scanner := bufio.NewScanner(resp.Body)
-	scanner.Buffer(make([]byte, 1024*1024), 1024*1024)
-	for scanner.Scan() {
-		line := scanner.Text()
-		if !strings.HasPrefix(line, "data: ") {
-			continue
-		}
-		data := strings.TrimPrefix(line, "data: ")
-
-		var chunk map[string]interface{}
-		if err := json.Unmarshal([]byte(data), &chunk); err != nil {
-			continue
+	for iteration := 0; iteration < 5; iteration++ {
+		if ctx.Err() != nil {
+			break
 		}
 
-		text := extractGeminiText(chunk)
-		if text == "" {
-			continue
+		requestBody["contents"] = contents
+		if toolDecls != nil {
+			requestBody["tools"] = toolDecls
 		}
 
-		for _, sentence := range acc.feed(text) {
-			speak(sentence)
+		bodyBytes, err := json.Marshal(requestBody)
+		if err != nil {
+			logger.Errorf(ctx, "Failed to marshal Gemini request: %v", err)
+			break
 		}
-	}
 
-	if err := scanner.Err(); err != nil {
-		logger.Errorf(ctx, "Gemini streaming error: %v", err)
-	}
+		req, err := http.NewRequestWithContext(ctx, "POST", geminiStreamURL(), bytes.NewReader(bodyBytes))
+		if err != nil {
+			logger.Errorf(ctx, "Failed to create Gemini request: %v", err)
+			break
+		}
+		req.Header.Set("Content-Type", "application/json")
 
-	if remainder := acc.drain(); remainder != "" {
-		speak(remainder)
+		resp, err := httpClient.Do(req)
+		if err != nil {
+			logger.Errorf(ctx, "Gemini streaming request failed: %v", err)
+			break
+		}
+
+		if resp.StatusCode != http.StatusOK {
+			body, _ := io.ReadAll(resp.Body)
+			resp.Body.Close()
+			logger.Errorf(ctx, "Gemini streaming API error (status %d): %s", resp.StatusCode, string(body))
+			break
+		}
+
+		var acc sentenceAccumulator
+		var funcCalls []map[string]interface{}
+
+		scanner := bufio.NewScanner(resp.Body)
+		scanner.Buffer(make([]byte, 1024*1024), 1024*1024)
+		for scanner.Scan() {
+			line := scanner.Text()
+			if !strings.HasPrefix(line, "data: ") {
+				continue
+			}
+			data := strings.TrimPrefix(line, "data: ")
+
+			var chunk map[string]interface{}
+			if err := json.Unmarshal([]byte(data), &chunk); err != nil {
+				continue
+			}
+
+			if text := extractGeminiText(chunk); text != "" {
+				for _, sentence := range acc.feed(text) {
+					speak(sentence)
+				}
+			}
+
+			if calls := extractGeminiFunctionCalls(chunk); len(calls) > 0 {
+				funcCalls = append(funcCalls, calls...)
+			}
+		}
+
+		if err := scanner.Err(); err != nil {
+			logger.Errorf(ctx, "Gemini streaming error: %v", err)
+		}
+		resp.Body.Close()
+
+		if remainder := acc.drain(); remainder != "" {
+			speak(remainder)
+		}
+
+		// No tool calls — we're done.
+		if len(funcCalls) == 0 {
+			break
+		}
+
+		// Execute tool calls and append results so the next streaming iteration
+		// gets the full tool context without a slow non-streaming round trip.
+		var modelParts []map[string]interface{}
+		var toolResponseParts []map[string]interface{}
+		for _, fc := range funcCalls {
+			toolName, _ := fc["name"].(string)
+			toolArgs, _ := fc["args"].(map[string]interface{})
+			modelParts = append(modelParts, map[string]interface{}{"functionCall": fc})
+
+			logger.Infof(ctx, "Gemini tool call: %s args=%v", toolName, toolArgs)
+			toolResult, err := mcpManager.CallTool(ctx, client, toolName, toolArgs)
+			if err != nil {
+				toolResult = fmt.Sprintf("Error: %v", err)
+			}
+			logger.Infof(ctx, "Tool %s result: %s", toolName, toolResult)
+
+			toolResponseParts = append(toolResponseParts, map[string]interface{}{
+				"functionResponse": map[string]interface{}{
+					"name":     toolName,
+					"response": map[string]interface{}{"result": toolResult},
+				},
+			})
+		}
+		contents = append(contents,
+			map[string]interface{}{"role": "model", "parts": modelParts},
+			map[string]interface{}{"role": "function", "parts": toolResponseParts},
+		)
 	}
 
 	response := strings.TrimSpace(assembled.String())

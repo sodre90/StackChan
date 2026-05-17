@@ -45,9 +45,10 @@ const (
 	speechPreBuffer = 5 // 5 × 60ms = 300ms pre-buffer
 
 	// Timing constants
-	vadMaxListenDuration = 20 * time.Second       // hard ceiling — process regardless of VAD
+	vadMaxListenDuration = 20 * time.Second        // hard ceiling — process regardless of VAD
 	echoHoldoffDuration  = 1500 * time.Millisecond // ignore mic audio this long after TTS ends
 	ttsRecoveryCooldown  = 12 * time.Second        // minimum gap between empty-ASR TTS resets
+	idleListenTimeout    = 60 * time.Second         // stop responding if no real speech for this long
 
 	// Retry settings
 	maxRetries       = 3
@@ -96,6 +97,9 @@ type AIClient struct {
 
 	// TTS recovery cooldown
 	lastRecoveryAt time.Time
+
+	// Last time real speech was successfully processed (for idle timeout)
+	lastRealSpeechAt time.Time
 
 	// Conversation context
 	messages      []map[string]interface{}
@@ -155,7 +159,7 @@ type XiaoZhiAbortMessage struct {
 // Initialize sets up the AI protocol handler with the given configuration
 func Initialize(config Config) {
 	aiConfig = config
-	mcpManager = NewMCPManager(config.BraveSearchAPIKey)
+	mcpManager = NewMCPManager(config)
 	logger.Info(context.Background(), "AI protocol initialized",
 		"api_base_url", config.APIBaseURL,
 		"llm_model", config.LLMModel,
@@ -169,6 +173,8 @@ func Initialize(config Config) {
 		"vad_silence_timeout_ms", config.VADSilenceTimeoutMs,
 		"vad_ticker_interval_ms", config.VADTickerIntervalMs,
 		"vad_rms_threshold", config.VADRMSThreshold,
+		"ha_url", config.HAUrl,
+		"ha_configured", config.HAUrl != "" && config.HAToken != "",
 	)
 }
 
@@ -509,6 +515,13 @@ vadLoop:
 		} else {
 			logger.Debugf(ctx, "Speech too short (%d ticks), likely noise — skipping ASR", speechTicks)
 		}
+		client.mu.RLock()
+		lastReal := client.lastRealSpeechAt
+		client.mu.RUnlock()
+		if !lastReal.IsZero() && time.Since(lastReal) > idleListenTimeout {
+			logger.Info(ctx, "Idle timeout — no speech for 60s, going quiet")
+			return
+		}
 		sendTTS(ctx, client, "start", "")
 		sendTTS(ctx, client, "stop", "")
 		return
@@ -564,7 +577,18 @@ vadLoop:
 		return
 	}
 
+	client.mu.Lock()
+	client.lastRealSpeechAt = time.Now()
+	client.mu.Unlock()
+
 	logger.Infof(ctx, "ASR transcribed: %q", transcribedText)
+
+	if isASRHallucination(transcribedText) {
+		logger.Warning(ctx, "ASR hallucination detected, discarding")
+		sendTTS(ctx, client, "start", "")
+		sendTTS(ctx, client, "stop", "")
+		return
+	}
 
 	// Send STT result to device
 	sendSTT(ctx, client, transcribedText)
@@ -595,7 +619,7 @@ func processLLMResponse(ctx context.Context, client *AIClient, userText string) 
 
 	var fullResponse string
 
-	if !aiConfig.EnableMCPTools && aiConfig.StreamLLM {
+	if aiConfig.StreamLLM {
 		// Sentence-streaming: LLM tokens feed into the accumulator; TTS fires per sentence.
 		if aiConfig.LLMProvider == "gemini" {
 			fullResponse = streamLLMSentencesGemini(speakCtx, client)
@@ -603,7 +627,7 @@ func processLLMResponse(ctx context.Context, client *AIClient, userText string) 
 			fullResponse = streamLLMSentences(speakCtx, client)
 		}
 	} else {
-		// Tools or non-streaming: get the complete response, then speak sentence by sentence.
+		// Non-streaming: get the complete response, then speak sentence by sentence.
 		fullResponse = callLLM(speakCtx, client)
 		fullResponse = stripEmojis(fullResponse)
 		for _, sentence := range splitSentences(fullResponse) {
@@ -840,6 +864,36 @@ func transcribeAudio(ctx context.Context, client *AIClient, packets [][]byte) st
 		}
 	}
 	return ""
+}
+
+// isASRHallucination detects common Whisper hallucination patterns:
+// repeated words/phrases, or very short transcriptions that are just noise.
+func isASRHallucination(text string) bool {
+	text = strings.TrimSpace(text)
+	if text == "" {
+		return true
+	}
+
+	// Split into words and check for excessive repetition
+	words := strings.Fields(text)
+	if len(words) < 2 {
+		return false
+	}
+
+	// Count word frequencies
+	freq := make(map[string]int)
+	for _, w := range words {
+		freq[strings.ToLower(strings.Trim(w, ".,!?"))]++
+	}
+
+	// If any single word makes up >60% of all words, it's hallucination
+	for _, count := range freq {
+		if float64(count)/float64(len(words)) > 0.6 && len(words) > 4 {
+			return true
+		}
+	}
+
+	return false
 }
 
 // callASRAPI sends PCM/WAV data to the ASR API.
