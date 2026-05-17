@@ -7,13 +7,13 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 WORKDIR /app
 RUN pip3 install --no-cache-dir \
         "faster-whisper>=1.0.3" \
+        "transformers>=4.40.0" \
         fastapi uvicorn pydantic python-multipart
 
 COPY whisper_server.py .
 EXPOSE 13000
 CMD ["python3", "whisper_server.py", \
-     "--model", "Maxdorger29/whisper-large-v3-turbo-hungarian-lora", \
+     "--model", "sarpba/whisper-base-hungarian_v1", \
      "--device", "cpu", \
-     "--compute-type", "int8_float32", \
-     "--feature-size", "128", \
+     "--compute-type", "int8", \
      "--port", "13000"]

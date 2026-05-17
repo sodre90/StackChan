@@ -97,8 +97,22 @@ if __name__ == "__main__":
                              "Auto-detected when omitted.")
     args = parser.parse_args()
 
-    logger.info(f"Loading {args.model} on {args.device} ({args.compute_type})...")
-    model = WhisperModel(args.model, device=args.device, compute_type=args.compute_type, cpu_threads=8)
+    model_path = args.model
+    ct2_cache = os.path.join(os.path.expanduser("~"), ".cache", "ct2_models",
+                             args.model.replace("/", "__"))
+    if not os.path.exists(os.path.join(ct2_cache, "model.bin")):
+        try:
+            from ctranslate2.converters import WhisperConverter
+            logger.info(f"Converting {args.model} to CTranslate2 format → {ct2_cache}")
+            WhisperConverter(args.model).convert(ct2_cache, quantization=args.compute_type,
+                                                 force=True)
+            model_path = ct2_cache
+            logger.info("Conversion done.")
+        except Exception:
+            pass  # not a HF transformers model — let WhisperModel handle it as-is
+
+    logger.info(f"Loading {model_path} on {args.device} ({args.compute_type})...")
+    model = WhisperModel(model_path, device=args.device, compute_type=args.compute_type, cpu_threads=8)
 
     if args.feature_size is not None:
         from faster_whisper.feature_extractor import FeatureExtractor
