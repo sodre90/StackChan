@@ -14,6 +14,7 @@ RUN git clone --depth 1 --recurse-submodules --shallow-submodules \
         https://github.com/OpenNMT/CTranslate2 /tmp/ct2 && \
     cmake -B /tmp/ct2-build /tmp/ct2 \
         -DWITH_MKL=OFF -DWITH_OPENBLAS=ON \
+        -DOPENMP_RUNTIME=COMP \
         -DCMAKE_CXX_FLAGS="-mavx512f -mavx512bf16" \
         -DCMAKE_INSTALL_PREFIX=/usr/local \
         -DBUILD_TESTS=OFF -DBUILD_BINARIES=OFF && \
