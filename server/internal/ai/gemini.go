@@ -14,6 +14,14 @@ import (
 
 const geminiDefaultBaseURL = "https://generativelanguage.googleapis.com/v1beta"
 
+func systemPromptWithDate(base string) string {
+	if base == "" {
+		base = "You are a helpful AI assistant."
+	}
+	dateStr := time.Now().Format("2006-01-02 (Monday)")
+	return "Today's date is " + dateStr + ".\n\n" + base
+}
+
 func geminiGenerateURL() string {
 	base := geminiDefaultBaseURL
 	return fmt.Sprintf("%s/models/%s:generateContent?key=%s",
@@ -215,10 +223,7 @@ func callLLMGemini(ctx context.Context, client *AIClient) string {
 		return callLLMGeminiWithTools(ctx, client)
 	}
 
-	systemPrompt := aiConfig.SystemPrompt
-	if systemPrompt == "" {
-		systemPrompt = "You are a helpful AI assistant."
-	}
+	systemPrompt := systemPromptWithDate(aiConfig.SystemPrompt)
 
 	contextMessages := getContextMessages(ctx, client)
 	requestBody := buildGeminiRequest(systemPrompt, contextMessages)
@@ -273,10 +278,7 @@ func callLLMGeminiWithTools(ctx context.Context, client *AIClient) string {
 		return ""
 	}
 
-	systemPrompt := aiConfig.SystemPrompt
-	if systemPrompt == "" {
-		systemPrompt = "You are a helpful AI assistant."
-	}
+	systemPrompt := systemPromptWithDate(aiConfig.SystemPrompt)
 
 	contextMessages := getContextMessages(ctx, client)
 	requestBody := buildGeminiRequest(systemPrompt, contextMessages)
@@ -377,10 +379,7 @@ func streamLLMSentencesGemini(ctx context.Context, client *AIClient) string {
 		return ""
 	}
 
-	systemPrompt := aiConfig.SystemPrompt
-	if systemPrompt == "" {
-		systemPrompt = "You are a helpful AI assistant."
-	}
+	systemPrompt := systemPromptWithDate(aiConfig.SystemPrompt)
 
 	contextMessages := getContextMessages(ctx, client)
 	requestBody := buildGeminiRequest(systemPrompt, contextMessages)
