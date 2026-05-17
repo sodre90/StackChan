@@ -37,7 +37,7 @@ const (
 
 	// Audio processing constants
 	maxAudioBufferSize = 5 * 1024 * 1024 // 5MB max buffer
-	opusFrameDelayMs   = 50              // ms between Opus frames — slightly under the 60ms frame duration so the device keeps a small jitter buffer (frames sent ~1.2x realtime). audioPlayoutDeadline tracking handles the resulting buffer drain before tts.stop.
+	opusFrameDelayMs   = 60              // ms between Opus frames — must match the 60ms frame duration. Faster causes TCP backpressure + crackling; slower starves the device. audioPlayoutDeadline still tracks playout precisely.
 
 	// VAD — inline RMS-based detector in processASRAndLLM.
 	// speechPreBuffer: packets kept before detected onset to avoid clipping first phoneme.
