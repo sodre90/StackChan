@@ -37,7 +37,7 @@ const (
 
 	// Audio processing constants
 	maxAudioBufferSize = 5 * 1024 * 1024 // 5MB max buffer
-	opusFrameDelayMs   = 40              // ms between Opus frames (frames are 60ms; ~1.5x realtime to gently build device-side buffer without overwhelming the ESP32)
+	opusFrameDelayMs   = 60              // ms between Opus frames — match the frame duration so we send at realtime and the device buffer stays near-empty (prevents tts.stop from arriving mid-playback)
 
 	// VAD — inline RMS-based detector in processASRAndLLM.
 	// speechPreBuffer: packets kept before detected onset to avoid clipping first phoneme.
@@ -94,6 +94,12 @@ type AIClient struct {
 
 	// Speaking cancellation — cancelled when device sends abort
 	speakCancel context.CancelFunc
+
+	// audioPlayoutDeadline is when the device is expected to finish playing all
+	// audio frames that have been written to the WebSocket so far in the current
+	// turn. Tracked so we can wait for the device's buffer to drain before sending
+	// tts.stop — otherwise the firmware leaves the LED in "speaking" state.
+	audioPlayoutDeadline time.Time
 
 	// TTS recovery cooldown
 	lastRecoveryAt time.Time
@@ -611,6 +617,10 @@ func processLLMResponse(ctx context.Context, client *AIClient, userText string) 
 		client.mu.Unlock()
 	}()
 
+	client.mu.Lock()
+	client.audioPlayoutDeadline = time.Time{}
+	client.mu.Unlock()
+
 	sendTTS(speakCtx, client, "start", "")
 
 	var fullResponse string
@@ -649,10 +659,19 @@ func processLLMResponse(ctx context.Context, client *AIClient, userText string) 
 
 	addMessageToContext(ctx, client, "assistant", fullResponse)
 
-	// Wait for the device to finish playing the last audio frames.
-	// Frames are sent faster than realtime (20ms intervals for 60ms frames),
-	// so the device is still playing when we reach this point.
-	time.Sleep(500 * time.Millisecond)
+	// Wait for the device's audio buffer to fully drain before sending tts.stop.
+	// audioPlayoutDeadline is the wall-clock time the device should finish
+	// playing all frames written so far. Sending tts.stop too early leaves the
+	// firmware in "speaking" state (LED stuck blue) once the buffer drains.
+	client.mu.Lock()
+	deadline := client.audioPlayoutDeadline
+	client.mu.Unlock()
+	if remaining := time.Until(deadline); remaining > 0 {
+		select {
+		case <-time.After(remaining):
+		case <-speakCtx.Done():
+		}
+	}
 
 	client.mu.Lock()
 	client.ttsEndedAt = time.Now()
@@ -1496,11 +1515,14 @@ func sendAudioChunks(ctx context.Context, client *AIClient, audioData []byte) {
 
 	totalFrames := len(frames)
 	sentFrames := 0
+	frameStart := time.Now()
+	completed := true
 
 	for _, frame := range frames {
 		if ctx.Err() != nil {
 			logger.Infof(ctx, "Audio playback interrupted after %d/%d frames", sentFrames, totalFrames)
-			return
+			completed = false
+			break
 		}
 
 		if err := client.writeWS(websocket.BinaryMessage, frame); err != nil {
@@ -1510,6 +1532,7 @@ func sendAudioChunks(ctx context.Context, client *AIClient, audioData []byte) {
 				logger.Errorf(ctx, "Failed to send audio frame %d/%d: %v", sentFrames+1, totalFrames, err)
 				sendTTS(ctx, client, "abort", "connection error")
 			}
+			completed = false
 			break
 		}
 
@@ -1517,7 +1540,18 @@ func sendAudioChunks(ctx context.Context, client *AIClient, audioData []byte) {
 		time.Sleep(opusFrameDelayMs * time.Millisecond)
 	}
 
-	if sentFrames > 0 {
+	// Advance the per-client audio playout deadline so processLLMResponse can wait
+	// for the device's buffer to drain before sending tts.stop. Skip on interrupted
+	// playback — the device discards buffered audio on abort/disconnect.
+	if completed && sentFrames > 0 {
+		audioMs := time.Duration(sentFrames*OpusFrameDuration) * time.Millisecond
+		client.mu.Lock()
+		base := client.audioPlayoutDeadline
+		if base.Before(frameStart) {
+			base = frameStart
+		}
+		client.audioPlayoutDeadline = base.Add(audioMs)
+		client.mu.Unlock()
 		logger.Infof(ctx, "Audio playback complete: %d/%d frames sent", sentFrames, totalFrames)
 	}
 }
