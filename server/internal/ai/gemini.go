@@ -457,7 +457,7 @@ func streamLLMSentencesGemini(ctx context.Context, client *AIClient) string {
 		// funcCallParts stores full part objects so thought_signature is preserved.
 		var funcCallParts []map[string]interface{}
 		var firstTokenAt time.Time
-		var chunkCount int
+		var chunkCount, thoughtChunks int
 
 		scanner := bufio.NewScanner(resp.Body)
 		scanner.Buffer(make([]byte, 1024*1024), 1024*1024)
@@ -473,6 +473,27 @@ func streamLLMSentencesGemini(ctx context.Context, client *AIClient) string {
 				continue
 			}
 			chunkCount++
+			chunkAge := time.Since(iterStart)
+
+			// Check for thought parts (thinking model tokens we filter out)
+			isThought := false
+			if cands, ok := chunk["candidates"].([]interface{}); ok && len(cands) > 0 {
+				if cand, ok := cands[0].(map[string]interface{}); ok {
+					if content, ok := cand["content"].(map[string]interface{}); ok {
+						if parts, ok := content["parts"].([]interface{}); ok {
+							for _, p := range parts {
+								if part, ok := p.(map[string]interface{}); ok {
+									if thought, ok := part["thought"].(bool); ok && thought {
+										isThought = true
+										thoughtChunks++
+									}
+								}
+							}
+						}
+					}
+				}
+			}
+			logger.Debugf(ctx, "Gemini stream iter=%d chunk=%d at=%.0fms thought=%v", iteration, chunkCount, float64(chunkAge.Milliseconds()), isThought)
 
 			if text := extractGeminiText(chunk); text != "" {
 				if firstTokenAt.IsZero() {
@@ -499,8 +520,8 @@ func streamLLMSentencesGemini(ctx context.Context, client *AIClient) string {
 		resp.Body.Close()
 
 		streamDuration := time.Since(iterStart)
-		logger.Debugf(ctx, "Gemini stream iter=%d done: chunks=%d tools=%d total=%.0fms",
-			iteration, chunkCount, len(funcCallParts), float64(streamDuration.Milliseconds()))
+		logger.Debugf(ctx, "Gemini stream iter=%d done: chunks=%d thought=%d tools=%d total=%.0fms",
+			iteration, chunkCount, thoughtChunks, len(funcCallParts), float64(streamDuration.Milliseconds()))
 
 		if remainder := acc.drain(); remainder != "" {
 			speak(remainder)
