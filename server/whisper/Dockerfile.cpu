@@ -16,6 +16,7 @@ COPY whisper_server.py .
 EXPOSE 13000
 CMD ["python3", "whisper_server.py", \
      "--model", "sarpba/whisper-base-hungarian_v1", \
+     "--model-subfolder", "quants/int8_bfloat16", \
      "--device", "cpu", \
-     "--compute-type", "float32", \
+     "--compute-type", "int8_float32", \
      "--port", "13000"]

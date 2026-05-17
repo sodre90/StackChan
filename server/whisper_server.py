@@ -92,25 +92,41 @@ if __name__ == "__main__":
                         choices=["cuda", "cpu", "auto"])
     parser.add_argument("--compute-type", type=str, default="float16",
                         help="float16 (cuda), int8_float16 (cuda, faster), int8 (cpu)")
+    parser.add_argument("--model-subfolder", type=str, default=None,
+                        help="Subfolder within the HF repo containing a pre-quantized CTranslate2 model "
+                             "(e.g. quants/int8_bfloat16). Skips runtime conversion.")
     parser.add_argument("--feature-size", type=int, default=None,
                         help="Override mel filterbank size (80 for old models, 128 for large-v3+). "
                              "Auto-detected when omitted.")
     args = parser.parse_args()
 
     model_path = args.model
-    ct2_cache = os.path.join(os.path.expanduser("~"), ".cache", "ct2_models",
-                             args.model.replace("/", "__"))
-    if not os.path.exists(os.path.join(ct2_cache, "model.bin")):
-        try:
-            from ctranslate2.converters import TransformersConverter
-            logger.info(f"Converting {args.model} to CTranslate2 format → {ct2_cache}")
-            TransformersConverter(args.model, low_cpu_mem_usage=True).convert(
-                ct2_cache, quantization=args.compute_type, force=True)
-            model_path = ct2_cache
-            logger.info("Conversion done.")
-        except Exception as e:
-            logger.warning(f"CTranslate2 conversion failed: {e}")
-            # not a HF transformers model — let WhisperModel handle it as-is
+
+    if args.model_subfolder:
+        from huggingface_hub import snapshot_download
+        cache_key = args.model.replace("/", "__") + "__" + args.model_subfolder.replace("/", "__")
+        local_dir = os.path.join(os.path.expanduser("~"), ".cache", "ct2_models", cache_key)
+        subfolder_path = os.path.join(local_dir, args.model_subfolder)
+        if not os.path.exists(os.path.join(subfolder_path, "model.bin")):
+            logger.info(f"Downloading {args.model}/{args.model_subfolder} from HuggingFace...")
+            snapshot_download(repo_id=args.model, local_dir=local_dir,
+                              allow_patterns=[f"{args.model_subfolder}/*"])
+            logger.info("Download done.")
+        model_path = subfolder_path
+        logger.info(f"Using pre-quantized model at {model_path}")
+    else:
+        ct2_cache = os.path.join(os.path.expanduser("~"), ".cache", "ct2_models",
+                                 args.model.replace("/", "__"))
+        if not os.path.exists(os.path.join(ct2_cache, "model.bin")):
+            try:
+                from ctranslate2.converters import TransformersConverter
+                logger.info(f"Converting {args.model} to CTranslate2 format → {ct2_cache}")
+                TransformersConverter(args.model, low_cpu_mem_usage=True).convert(
+                    ct2_cache, quantization=args.compute_type, force=True)
+                model_path = ct2_cache
+                logger.info("Conversion done.")
+            except Exception as e:
+                logger.warning(f"CTranslate2 conversion failed: {e}")
 
     logger.info(f"Loading {model_path} on {args.device} ({args.compute_type})...")
     model = WhisperModel(model_path, device=args.device, compute_type=args.compute_type, cpu_threads=8)
