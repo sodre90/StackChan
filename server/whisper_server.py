@@ -108,8 +108,9 @@ if __name__ == "__main__":
                                                  force=True)
             model_path = ct2_cache
             logger.info("Conversion done.")
-        except Exception:
-            pass  # not a HF transformers model — let WhisperModel handle it as-is
+        except Exception as e:
+            logger.warning(f"CTranslate2 conversion failed: {e}")
+            # not a HF transformers model — let WhisperModel handle it as-is
 
     logger.info(f"Loading {model_path} on {args.device} ({args.compute_type})...")
     model = WhisperModel(model_path, device=args.device, compute_type=args.compute_type, cpu_threads=8)
