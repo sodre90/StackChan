@@ -1,4 +1,4 @@
-FROM golang:1.24-alpine AS builder
+FROM docker.io/library/golang:1.24-alpine AS builder
 RUN apk add --no-cache gcc musl-dev opus-dev opusfile-dev
 WORKDIR /src
 COPY go.mod go.sum ./
@@ -6,7 +6,7 @@ RUN go mod download
 COPY . .
 RUN CGO_ENABLED=1 go build -o stackchan .
 
-FROM alpine:latest
+FROM docker.io/library/alpine:latest
 RUN apk add --no-cache opus opusfile
 WORKDIR /app
 COPY --from=builder /src/stackchan .
