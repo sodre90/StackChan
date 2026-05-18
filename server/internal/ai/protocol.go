@@ -37,7 +37,8 @@ const (
 
 	// Audio processing constants
 	maxAudioBufferSize = 5 * 1024 * 1024 // 5MB max buffer
-	opusFrameDelayMs   = 60              // ms between Opus frames — must match the 60ms frame duration. Faster causes TCP backpressure + crackling; slower starves the device. audioPlayoutDeadline still tracks playout precisely.
+	opusFrameDelayMs   = 60              // ms between Opus frames — match the 60ms frame duration so we send at realtime. Continuous over-rate causes TCP backpressure → bursty arrival → crackling. audioPlayoutDeadline still tracks playout precisely.
+	opusBurstFrames    = 5               // frames sent back-to-back at the start of each batch to build a ~300ms device-side jitter buffer (after that we settle into realtime). Absorbs WiFi jitter without sustained backpressure.
 
 	// VAD — inline RMS-based detector in processASRAndLLM.
 	// speechPreBuffer: packets kept before detected onset to avoid clipping first phoneme.
@@ -1518,7 +1519,7 @@ func sendAudioChunks(ctx context.Context, client *AIClient, audioData []byte) {
 	frameStart := time.Now()
 	completed := true
 
-	for _, frame := range frames {
+	for i, frame := range frames {
 		if ctx.Err() != nil {
 			logger.Infof(ctx, "Audio playback interrupted after %d/%d frames", sentFrames, totalFrames)
 			completed = false
@@ -1537,7 +1538,11 @@ func sendAudioChunks(ctx context.Context, client *AIClient, audioData []byte) {
 		}
 
 		sentFrames++
-		time.Sleep(opusFrameDelayMs * time.Millisecond)
+		// Burst the first few frames to build a device-side jitter buffer;
+		// after that, settle into realtime so we don't accumulate backpressure.
+		if i >= opusBurstFrames {
+			time.Sleep(opusFrameDelayMs * time.Millisecond)
+		}
 	}
 
 	// Advance the per-client audio playout deadline so processLLMResponse can wait
