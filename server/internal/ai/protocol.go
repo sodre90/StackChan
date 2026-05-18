@@ -37,8 +37,15 @@ const (
 
 	// Audio processing constants
 	maxAudioBufferSize = 5 * 1024 * 1024 // 5MB max buffer
-	opusFrameDelayMs   = 55              // ms between Opus frames — send slightly faster than the 60ms frame duration to account for TCP backpressure and sleep inaccuracies.
-	opusBurstFrames    = 10              // frames sent back-to-back at the start of each batch to build a ~600ms device-side jitter buffer (after that we settle into realtime). Absorbs WiFi jitter without sustained backpressure.
+	// Continuous-pacing model: burst opusBurstFrames up front to prime the device's
+	// jitter buffer, then send subsequent frames at opusPaceMs (slightly under
+	// 60ms) so the buffer slowly tops up over the course of a reply. opusMaxLeadMs
+	// caps how far ahead the schedule can run — beyond that we sleep the excess
+	// and stop growing the buffer, preventing TCP backpressure (which previously
+	// manifested as crackling when we sent too fast continuously).
+	opusBurstFrames = 10  // ~600ms initial cushion
+	opusPaceMs      = 58  // 2ms/frame faster than realtime → ~33ms/sec buffer growth
+	opusMaxLeadMs   = 900 // hard cap on accumulated lead (~15 frames ≈ 0.9s ahead)
 
 	// VAD — inline RMS-based detector in processASRAndLLM.
 	// speechPreBuffer: packets kept before detected onset to avoid clipping first phoneme.
@@ -734,6 +741,37 @@ func streamLLMSentences(ctx context.Context, client *AIClient) string {
 	var acc sentenceAccumulator
 	var assembled strings.Builder
 
+	type ttsJob struct {
+		sentence string
+		audio    []byte
+	}
+	sentenceCh := make(chan string, 8)
+	resultCh := make(chan ttsJob, 8)
+	playerDone := make(chan struct{})
+
+	go func() {
+		for s := range sentenceCh {
+			var audio []byte
+			if aiConfig.EnableTTS {
+				audio = generateSpeech(ctx, s)
+			}
+			resultCh <- ttsJob{sentence: s, audio: audio}
+		}
+		close(resultCh)
+	}()
+
+	go func() {
+		defer close(playerDone)
+		for job := range resultCh {
+			if ctx.Err() != nil {
+				continue
+			}
+			if len(job.audio) > 0 {
+				sendAudioChunks(ctx, client, job.audio)
+			}
+		}
+	}()
+
 	speak := func(sentence string) {
 		if ctx.Err() != nil {
 			return
@@ -745,11 +783,7 @@ func streamLLMSentences(ctx context.Context, client *AIClient) string {
 		assembled.WriteString(sentence)
 		assembled.WriteByte(' ')
 		sendTTS(ctx, client, "sentence_start", sentence)
-		if aiConfig.EnableTTS {
-			if audio := generateSpeech(ctx, sentence); len(audio) > 0 {
-				sendAudioChunks(ctx, client, audio)
-			}
-		}
+		sentenceCh <- sentence
 	}
 
 	scanner := bufio.NewScanner(resp.Body)
@@ -791,6 +825,9 @@ func streamLLMSentences(ctx context.Context, client *AIClient) string {
 	if remainder := acc.drain(); remainder != "" {
 		speak(remainder)
 	}
+
+	close(sentenceCh)
+	<-playerDone
 
 	response := strings.TrimSpace(assembled.String())
 	if response != "" {
@@ -1516,10 +1553,23 @@ func sendAudioChunks(ctx context.Context, client *AIClient, audioData []byte) {
 
 	totalFrames := len(frames)
 	sentFrames := 0
-	frameStart := time.Now()
 	completed := true
 
-	for i, frame := range frames {
+	// Pacing is driven directly off audioPlayoutDeadline (the wall-clock time the
+	// device is expected to finish playing all queued audio). lead = deadline - now
+	// is how many ms of buffered audio the device has. We burst until lead reaches
+	// burstLead, then send slightly faster than realtime (opusPaceMs) to gently
+	// rebuild the buffer after jitter, and cap growth at opusMaxLeadMs.
+	burstLead := time.Duration(opusBurstFrames) * OpusFrameDuration * time.Millisecond
+
+	client.mu.Lock()
+	deadline := client.audioPlayoutDeadline
+	client.mu.Unlock()
+	if deadline.Before(time.Now()) {
+		deadline = time.Now()
+	}
+
+	for _, frame := range frames {
 		if ctx.Err() != nil {
 			logger.Infof(ctx, "Audio playback interrupted after %d/%d frames", sentFrames, totalFrames)
 			completed = false
@@ -1538,24 +1588,29 @@ func sendAudioChunks(ctx context.Context, client *AIClient, audioData []byte) {
 		}
 
 		sentFrames++
-		// Burst the first few frames to build a device-side jitter buffer;
-		// after that, settle into realtime so we don't accumulate backpressure.
-		if i >= opusBurstFrames {
-			time.Sleep(opusFrameDelayMs * time.Millisecond)
+		deadline = deadline.Add(time.Duration(OpusFrameDuration) * time.Millisecond)
+
+		lead := time.Until(deadline)
+		switch {
+		case lead < burstLead:
+			// Below burst target — keep sending back-to-back to (re)build cushion.
+			// No sleep. Triggers on first frames AND after a large jitter event
+			// that drained the buffer.
+		case lead > opusMaxLeadMs*time.Millisecond:
+			// Cap hit — sleep just enough to drop back to the cap. Subsequent
+			// frames will then alternate "send-frame +60ms / sleep +60ms" at
+			// realtime, holding the lead constant and avoiding TCP backpressure.
+			time.Sleep(lead - opusMaxLeadMs*time.Millisecond)
+		default:
+			// Normal regime — send slightly faster than realtime so the device
+			// buffer slowly creeps up after any draining events.
+			time.Sleep(opusPaceMs * time.Millisecond)
 		}
 	}
 
-	// Advance the per-client audio playout deadline so processLLMResponse can wait
-	// for the device's buffer to drain before sending tts.stop. Skip on interrupted
-	// playback — the device discards buffered audio on abort/disconnect.
 	if completed && sentFrames > 0 {
-		audioMs := time.Duration(sentFrames*OpusFrameDuration) * time.Millisecond
 		client.mu.Lock()
-		base := client.audioPlayoutDeadline
-		if base.Before(frameStart) {
-			base = frameStart
-		}
-		client.audioPlayoutDeadline = base.Add(audioMs)
+		client.audioPlayoutDeadline = deadline
 		client.mu.Unlock()
 		logger.Infof(ctx, "Audio playback complete: %d/%d frames sent", sentFrames, totalFrames)
 	}
