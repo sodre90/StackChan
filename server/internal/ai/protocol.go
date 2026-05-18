@@ -37,8 +37,8 @@ const (
 
 	// Audio processing constants
 	maxAudioBufferSize = 5 * 1024 * 1024 // 5MB max buffer
-	opusFrameDelayMs   = 60              // ms between Opus frames — match the 60ms frame duration so we send at realtime. Continuous over-rate causes TCP backpressure → bursty arrival → crackling. audioPlayoutDeadline still tracks playout precisely.
-	opusBurstFrames    = 5               // frames sent back-to-back at the start of each batch to build a ~300ms device-side jitter buffer (after that we settle into realtime). Absorbs WiFi jitter without sustained backpressure.
+	opusFrameDelayMs   = 55              // ms between Opus frames — send slightly faster than the 60ms frame duration to account for TCP backpressure and sleep inaccuracies.
+	opusBurstFrames    = 10              // frames sent back-to-back at the start of each batch to build a ~600ms device-side jitter buffer (after that we settle into realtime). Absorbs WiFi jitter without sustained backpressure.
 
 	// VAD — inline RMS-based detector in processASRAndLLM.
 	// speechPreBuffer: packets kept before detected onset to avoid clipping first phoneme.
