@@ -319,9 +319,25 @@ func (gc *googleCalendar) tick(ctx context.Context) {
 			spoken += " Location: " + ev.Location + "."
 		}
 
-		spokenCount := SpeakToDevice(ctx, "", spoken)
+		// Visual bubble always — reliable on the persistent avatar channel even when idle.
 		shownCount := web_socket.BroadcastTextToStackChans(ctx, "Calendar", visual)
-		logger.Infof(ctx, "Calendar announce: spoken on %d, shown on %d device(s): %s", spokenCount, shownCount, spoken)
+
+		// Spoken audio: prefer the AI channel if a session is live; otherwise push TTS
+		// over the avatar channel so an idle device still speaks the reminder aloud.
+		spokenCount := SpeakToDevice(ctx, "", spoken)
+		audioCount := 0
+		if spokenCount == 0 {
+			if audio := generateSpeech(ctx, spoken); len(audio) > 0 {
+				if frames, ferr := ttsAudioToOpusFrames(audio); ferr == nil && len(frames) > 0 {
+					audioCount = web_socket.BroadcastAudioToStackChans(ctx, frames)
+				} else if ferr != nil {
+					logger.Warningf(ctx, "calendar announce: opus framing failed: %v", ferr)
+				}
+			}
+		}
+
+		logger.Infof(ctx, "Calendar announce: shown on %d, spoken(AI) on %d, spoken(avatar) on %d device(s): %s",
+			shownCount, spokenCount, audioCount, spoken)
 	}
 }
 
