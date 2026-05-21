@@ -496,12 +496,7 @@ void StackChanAvatarDisplay::SetStatus(const char* status)
     }
 
     if (is_idle) {
-        // Start idle motion
-        ESP_LOGW(TAG, "Start idle motion");
-        if (idle_motion_modifier_id_ < 0) {
-            idle_motion_modifier_id_     = stackchan.addModifier(std::make_unique<IdleMotionModifier>());
-            idle_expression_modifier_id_ = stackchan.addModifier(std::make_unique<IdleExpressionModifier>());
-        }
+        // Idle motion disabled
     } else {
         // Stop idle motion
         ESP_LOGW(TAG, "Stop idle motion");
