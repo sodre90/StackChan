@@ -96,6 +96,21 @@ type Config struct {
 
 	// Home Assistant long-lived access token
 	HAToken string `yaml:"ha_token" json:"ha_token"`
+
+	// Google OAuth2 client ID (Desktop-app type). Required to enable calendar tools.
+	GoogleOAuthClientID string `yaml:"google_oauth_client_id" json:"google_oauth_client_id"`
+
+	// Google OAuth2 client secret. Required to enable calendar tools.
+	GoogleOAuthClientSecret string `yaml:"google_oauth_client_secret" json:"google_oauth_client_secret"`
+
+	// Google OAuth2 refresh token obtained via the one-time loopback helper.
+	GoogleOAuthRefreshToken string `yaml:"google_oauth_refresh_token" json:"google_oauth_refresh_token"`
+
+	// Google Calendar ID to read. Defaults to "primary" (the user's main calendar).
+	GoogleCalendarID string `yaml:"google_calendar_id" json:"google_calendar_id"`
+
+	// Minutes before an event start to announce it to the device. 0 disables proactive announcements.
+	GoogleCalendarAnnounceMinutes int `yaml:"google_calendar_announce_minutes" json:"google_calendar_announce_minutes"`
 }
 
 // DefaultConfig returns the default AI configuration for local Ollama setup

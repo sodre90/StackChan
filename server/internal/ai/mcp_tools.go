@@ -52,6 +52,7 @@ type MCPManager struct {
 	braveAPIKey   string
 	haURL         string
 	haToken       string
+	gcal          *googleCalendar
 }
 
 // DeviceState tracks the state of an ESP32 device
@@ -236,6 +237,10 @@ func NewMCPManager(cfg Config) *MCPManager {
 
 	if m.haURL != "" && m.haToken != "" {
 		m.registerHomeAssistantTools()
+	}
+
+	if cfg.GoogleOAuthClientID != "" && cfg.GoogleOAuthClientSecret != "" && cfg.GoogleOAuthRefreshToken != "" {
+		m.registerGoogleCalendarTools(cfg)
 	}
 
 	return m

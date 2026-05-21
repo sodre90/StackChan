@@ -82,3 +82,12 @@ enable_mcp_tools: true
 
 # Home Assistant integration (set ha_token in additional_config.yaml)
 ha_url: "http://192.168.2.166:8123"
+
+# Google Calendar integration.
+# Set google_oauth_client_id / google_oauth_client_secret / google_oauth_refresh_token
+# in additional_config.yaml (run `go run ./cmd/google_oauth_helper` to obtain them).
+# google_calendar_id defaults to "primary".
+# google_calendar_announce_minutes: minutes ahead of an event start to speak a heads-up
+# to every connected device. Set to 0 to disable proactive announcements.
+google_calendar_id: "primary"
+google_calendar_announce_minutes: 10

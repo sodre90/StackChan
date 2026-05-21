@@ -1706,6 +1706,66 @@ func GetActiveClients() []string {
 	return result
 }
 
+// SpeakToDevice synthesizes text to TTS audio and plays it on every connected device
+// (or only the one matching targetMac if non-empty). Used by background announcers
+// like the calendar poller. Returns the number of devices the message was sent to.
+func SpeakToDevice(ctx context.Context, targetMac, text string) int {
+	text = stripEmojis(strings.TrimSpace(text))
+	if text == "" {
+		return 0
+	}
+
+	clientsMu.RLock()
+	targets := make([]*AIClient, 0, len(activeClients))
+	for mac, c := range activeClients {
+		if targetMac == "" || mac == targetMac {
+			targets = append(targets, c)
+		}
+	}
+	clientsMu.RUnlock()
+
+	if len(targets) == 0 {
+		return 0
+	}
+
+	var audio []byte
+	if aiConfig.EnableTTS {
+		audio = generateSpeech(ctx, text)
+	}
+
+	sent := 0
+	for _, client := range targets {
+		client.mu.Lock()
+		client.audioPlayoutDeadline = time.Time{}
+		client.mu.Unlock()
+
+		sendTTS(ctx, client, "start", "")
+		sendTTS(ctx, client, "sentence_start", text)
+
+		if len(audio) > 0 {
+			sendAudioChunks(ctx, client, audio)
+		}
+
+		client.mu.Lock()
+		deadline := client.audioPlayoutDeadline
+		client.mu.Unlock()
+		if remaining := time.Until(deadline); remaining > 0 {
+			select {
+			case <-time.After(remaining):
+			case <-ctx.Done():
+			}
+		}
+
+		client.mu.Lock()
+		client.ttsEndedAt = time.Now()
+		client.mu.Unlock()
+
+		sendTTS(ctx, client, "stop", "")
+		sent++
+	}
+	return sent
+}
+
 // sentenceAccumulator buffers streaming LLM tokens and yields complete sentences.
 type sentenceAccumulator struct {
 	buf strings.Builder
