@@ -1400,8 +1400,13 @@ func callLLMNonStream(ctx context.Context, req *http.Request, httpClient *http.C
 	return ""
 }
 
-// generateSpeech calls the TTS API to generate speech audio
+// generateSpeech calls the TTS API to generate speech audio with the configured voice.
 func generateSpeech(ctx context.Context, text string) []byte {
+	return generateSpeechWithVoice(ctx, text, "")
+}
+
+// generateSpeechWithVoice calls the TTS API; an empty voice uses the configured voice.
+func generateSpeechWithVoice(ctx context.Context, text, voice string) []byte {
 	ttsBase := aiConfig.TTSBaseURL
 	if ttsBase == "" {
 		ttsBase = aiConfig.APIBaseURL
@@ -1411,10 +1416,13 @@ func generateSpeech(ctx context.Context, text string) []byte {
 		return nil
 	}
 
+	if voice == "" {
+		voice = aiConfig.TTSVoice
+	}
 	requestBody := map[string]interface{}{
 		"model":           aiConfig.TTSModel,
 		"input":           text,
-		"voice":           aiConfig.TTSVoice,
+		"voice":           voice,
 		"response_format": aiConfig.TTSResponseFormat,
 	}
 
@@ -1710,6 +1718,12 @@ func GetActiveClients() []string {
 // (or only the one matching targetMac if non-empty). Used by background announcers
 // like the calendar poller. Returns the number of devices the message was sent to.
 func SpeakToDevice(ctx context.Context, targetMac, text string) int {
+	return SpeakToDeviceWithVoice(ctx, targetMac, text, "")
+}
+
+// SpeakToDeviceWithVoice is SpeakToDevice with an optional TTS voice override
+// (empty uses the configured voice). Handy for testing different voices on demand.
+func SpeakToDeviceWithVoice(ctx context.Context, targetMac, text, voice string) int {
 	text = stripEmojis(strings.TrimSpace(text))
 	if text == "" {
 		return 0
@@ -1730,7 +1744,7 @@ func SpeakToDevice(ctx context.Context, targetMac, text string) int {
 
 	var audio []byte
 	if aiConfig.EnableTTS {
-		audio = generateSpeech(ctx, text)
+		audio = generateSpeechWithVoice(ctx, text, voice)
 	}
 
 	sent := 0

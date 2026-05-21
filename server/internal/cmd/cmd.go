@@ -129,6 +129,36 @@ var (
 				r.Response.WriteJson(otaResponse)
 			})
 
+			// Test endpoint: push spoken text to connected device(s) via the same
+			// path as calendar announcements. Lets you verify idle playback / TTS
+			// voice without waiting for a real event.
+			//   GET/POST /xiaozhi/test/speak?text=...&mac=...&voice=...
+			// text required; mac optional (all devices if empty); voice optional
+			// (overrides configured TTS voice, e.g. hu-HU-NoemiNeural).
+			s.BindHandler("/xiaozhi/test/speak", func(r *ghttp.Request) {
+				text := r.Get("text").String()
+				if text == "" {
+					r.Response.WriteStatus(http.StatusBadRequest)
+					r.Response.WriteJson(g.Map{"error": "text parameter is required"})
+					return
+				}
+				mac := r.Get("mac").String()
+				voice := r.Get("voice").String()
+				count := ai.SpeakToDeviceWithVoice(r.Context(), mac, text, voice)
+				r.Response.WriteJson(g.Map{
+					"spoken_on_devices": count,
+					"text":              text,
+					"voice":             voice,
+					"mac":               mac,
+				})
+			})
+
+			// Test endpoint: list currently connected AI device MACs.
+			s.BindHandler("/xiaozhi/test/devices", func(r *ghttp.Request) {
+				macs := ai.GetActiveClients()
+				r.Response.WriteJson(g.Map{"count": len(macs), "devices": macs})
+			})
+
 			// Serve firmware binary at /xiaozhi/firmware.bin (placeholder)
 			s.Group("/xiaozhi", func(group *ghttp.RouterGroup) {
 				group.GET("/firmware.bin", func(r *ghttp.Request) {
