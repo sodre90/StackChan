@@ -25,6 +25,7 @@
 #include <wifi_manager.h>
 #include "utils/jpeg_to_image/jpeg_decoder.h"
 #include "utils/secret_logic/secret_logic.h"
+#include "application.h"  // Application::GetAudioService() for avatar-channel audio playback
 
 static std::string _tag = "WS-Avatar";
 
@@ -197,15 +198,20 @@ public:
             ESP_LOGI(_tag.c_str(), "Received binary type: %d, len: %d", (int)type, (int)msg.data.size());
 
             switch (type) {
-                // Opus handled in OnData Fast Path
-                // case DataType::Opus: {
-                //     if (msg.data.size() > 5) {
-                //         auto packet = std::make_unique<AudioStreamPacket>();
-                //         packet->payload.assign(msg.data.begin() + 5, msg.data.end());
-                //         _audio_service.PushPacketToDecodeQueue(std::move(packet));
-                //     }
-                //     break;
-                // }
+                case DataType::Opus: {
+                    // Server-pushed TTS audio (e.g. calendar announcements) played over
+                    // the persistent avatar channel even when idle. The AudioService
+                    // output task auto-enables the speaker when packets arrive.
+                    // Frames are 60ms SILK-WB Opus at 16kHz (see server tts_server.py).
+                    if (msg.data.size() > 5) {
+                        auto packet            = std::make_unique<AudioStreamPacket>();
+                        packet->sample_rate    = 16000;
+                        packet->frame_duration = 60;
+                        packet->payload.assign(msg.data.begin() + 5, msg.data.end());
+                        Application::GetInstance().GetAudioService().PushPacketToDecodeQueue(std::move(packet));
+                    }
+                    break;
+                }
                 case DataType::StartCameraStream: {
                     ESP_LOGI(_tag.c_str(), "Start Camera Stream");
                     setStreamingEnabled(true);
@@ -357,9 +363,14 @@ public:
                     break;
                 }
                 case DataType::StartAudioStream: {
+                    // Marker before a run of Opus frames. Reset the decoder so a fresh
+                    // announcement starts cleanly regardless of prior decoder state.
+                    ESP_LOGI(_tag.c_str(), "StartAudioStream");
+                    Application::GetInstance().GetAudioService().ResetDecoder();
                     break;
                 }
                 case DataType::StopAudioStream: {
+                    ESP_LOGI(_tag.c_str(), "StopAudioStream");
                     break;
                 }
                 default:
