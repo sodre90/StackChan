@@ -110,7 +110,13 @@ type Config struct {
 	GoogleCalendarID string `yaml:"google_calendar_id" json:"google_calendar_id"`
 
 	// Minutes before an event start to announce it to the device. 0 disables proactive announcements.
+	// Used as a fallback when GoogleCalendarReminderMinutes is empty.
 	GoogleCalendarAnnounceMinutes int `yaml:"google_calendar_announce_minutes" json:"google_calendar_announce_minutes"`
+
+	// Multiple reminder milestones in minutes before an event start, e.g. [30, 10, 1].
+	// Each milestone is announced once as the countdown crosses it. Overrides
+	// GoogleCalendarAnnounceMinutes when non-empty.
+	GoogleCalendarReminderMinutes []int `yaml:"google_calendar_reminder_minutes" json:"google_calendar_reminder_minutes"`
 }
 
 // DefaultConfig returns the default AI configuration for local Ollama setup

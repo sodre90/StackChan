@@ -87,7 +87,10 @@ ha_url: "http://192.168.2.166:8123"
 # Set google_oauth_client_id / google_oauth_client_secret / google_oauth_refresh_token
 # in additional_config.yaml (run `go run ./cmd/google_oauth_helper` to obtain them).
 # google_calendar_id defaults to "primary".
-# google_calendar_announce_minutes: minutes ahead of an event start to speak a heads-up
-# to every connected device. Set to 0 to disable proactive announcements.
+# google_calendar_reminder_minutes: announce at each of these many minutes before an
+# event start (each fires once). Overrides google_calendar_announce_minutes when set.
+# google_calendar_announce_minutes: single-milestone fallback. 0 disables announcements.
+# Announcements are spoken in Hungarian.
 google_calendar_id: "primary"
 google_calendar_announce_minutes: 10
+google_calendar_reminder_minutes: [30, 10, 1]

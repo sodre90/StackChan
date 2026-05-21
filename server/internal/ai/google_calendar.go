@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -25,14 +26,14 @@ type googleCalendar struct {
 	clientSecret   string
 	refreshToken   string
 	calendarID     string
-	announceLead   time.Duration // 0 disables proactive announce
+	reminderLeads  []time.Duration // milestones before start, sorted descending; empty disables announce
 
 	tokenMu     sync.Mutex
 	accessToken string
 	tokenExpiry time.Time
 
 	announcedMu sync.Mutex
-	announced   map[string]time.Time // event ID -> when we announced it
+	announced   map[string]time.Time // "eventID@leadMin" -> when we announced it
 }
 
 // calendarEvent is the trimmed view we hand to the LLM and the announcer.
@@ -51,13 +52,27 @@ func (m *MCPManager) registerGoogleCalendarTools(cfg Config) {
 	if calID == "" {
 		calID = "primary"
 	}
+	// Build reminder milestones: prefer the list; fall back to the single lead.
+	mins := cfg.GoogleCalendarReminderMinutes
+	if len(mins) == 0 && cfg.GoogleCalendarAnnounceMinutes > 0 {
+		mins = []int{cfg.GoogleCalendarAnnounceMinutes}
+	}
+	// Sort descending and convert to durations, dropping non-positive values.
+	sort.Sort(sort.Reverse(sort.IntSlice(mins)))
+	var leads []time.Duration
+	for _, m := range mins {
+		if m > 0 {
+			leads = append(leads, time.Duration(m)*time.Minute)
+		}
+	}
+
 	gc := &googleCalendar{
-		clientID:     cfg.GoogleOAuthClientID,
-		clientSecret: cfg.GoogleOAuthClientSecret,
-		refreshToken: cfg.GoogleOAuthRefreshToken,
-		calendarID:   calID,
-		announceLead: time.Duration(cfg.GoogleCalendarAnnounceMinutes) * time.Minute,
-		announced:    make(map[string]time.Time),
+		clientID:      cfg.GoogleOAuthClientID,
+		clientSecret:  cfg.GoogleOAuthClientSecret,
+		refreshToken:  cfg.GoogleOAuthRefreshToken,
+		calendarID:    calID,
+		reminderLeads: leads,
+		announced:     make(map[string]time.Time),
 	}
 	m.gcal = gc
 
@@ -84,7 +99,7 @@ func (m *MCPManager) registerGoogleCalendarTools(cfg Config) {
 		Handler: m.handleCalendarListUpcoming,
 	})
 
-	if gc.announceLead > 0 {
+	if len(gc.reminderLeads) > 0 {
 		go gc.runAnnouncer(context.Background())
 	}
 }
@@ -257,9 +272,9 @@ func (gc *googleCalendar) getAccessToken(ctx context.Context) (string, error) {
 	return gc.accessToken, nil
 }
 
-// runAnnouncer polls upcoming events and speaks each one once, `announceLead` ahead of its start.
+// runAnnouncer polls upcoming events and speaks each one once per reminder milestone.
 func (gc *googleCalendar) runAnnouncer(ctx context.Context) {
-	logger.Infof(ctx, "Calendar announcer started (lead=%v, calendar=%s)", gc.announceLead, gc.calendarID)
+	logger.Infof(ctx, "Calendar announcer started (leads=%v, calendar=%s)", gc.reminderLeads, gc.calendarID)
 	ticker := time.NewTicker(calendarPollInterval)
 	defer ticker.Stop()
 
@@ -288,30 +303,44 @@ func (gc *googleCalendar) tick(ctx context.Context) {
 			continue
 		}
 		untilStart := time.Until(ev.Start)
-		if untilStart < 0 || untilStart > gc.announceLead+calendarPollInterval {
+		if untilStart < 0 {
 			continue
 		}
-		if !gc.markAnnounced(ev.ID, now) {
-			continue
-		}
+		// Fire each milestone once, as the countdown crosses it: untilStart is in
+		// (lead - pollInterval, lead]. Per-(event, lead) dedup guards against jitter.
+		for _, lead := range gc.reminderLeads {
+			if untilStart > lead || untilStart <= lead-calendarPollInterval {
+				continue
+			}
+			key := fmt.Sprintf("%s@%d", ev.ID, int(lead.Minutes()))
+			if !gc.markAnnounced(key, now) {
+				continue
+			}
 
-		mins := int(untilStart.Round(time.Minute).Minutes())
-		var msg string
-		switch {
-		case mins <= 0:
-			msg = fmt.Sprintf("Heads up: %s is starting now.", ev.Summary)
-		case mins == 1:
-			msg = fmt.Sprintf("Heads up: %s starts in 1 minute.", ev.Summary)
-		default:
-			msg = fmt.Sprintf("Heads up: %s starts in %d minutes.", ev.Summary, mins)
+			msg := hungarianReminder(ev, untilStart)
+			count := SpeakToDevice(ctx, "", msg)
+			logger.Infof(ctx, "Calendar announce (lead %dm) sent to %d device(s): %s",
+				int(lead.Minutes()), count, msg)
 		}
-		if ev.Location != "" {
-			msg += " Location: " + ev.Location + "."
-		}
-
-		count := SpeakToDevice(ctx, "", msg)
-		logger.Infof(ctx, "Calendar announce sent to %d device(s): %s", count, msg)
 	}
+}
+
+// hungarianReminder builds the spoken reminder text in Hungarian.
+func hungarianReminder(ev calendarEvent, untilStart time.Duration) string {
+	mins := int(untilStart.Round(time.Minute).Minutes())
+	var msg string
+	switch {
+	case mins <= 0:
+		msg = fmt.Sprintf("Figyelem: %s most kezdődik.", ev.Summary)
+	case mins == 1:
+		msg = fmt.Sprintf("Figyelem: %s egy perc múlva kezdődik.", ev.Summary)
+	default:
+		msg = fmt.Sprintf("Figyelem: %s %d perc múlva kezdődik.", ev.Summary, mins)
+	}
+	if ev.Location != "" {
+		msg += " Helyszín: " + ev.Location + "."
+	}
+	return msg
 }
 
 func (gc *googleCalendar) markAnnounced(id string, now time.Time) bool {
