@@ -10,6 +10,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"stackChan/internal/web_socket"
 )
 
 const (
@@ -296,21 +298,30 @@ func (gc *googleCalendar) tick(ctx context.Context) {
 		}
 
 		mins := int(untilStart.Round(time.Minute).Minutes())
-		var msg string
+
+		// Spoken phrasing — only heard if an AI session happens to be connected.
+		var spoken string
+		// Short visual phrasing — rendered as a face speech bubble over the
+		// always-connected avatar channel, so it lands even when the device is idle.
+		var visual string
 		switch {
 		case mins <= 0:
-			msg = fmt.Sprintf("Heads up: %s is starting now.", ev.Summary)
+			spoken = fmt.Sprintf("Heads up: %s is starting now.", ev.Summary)
+			visual = fmt.Sprintf("%s — now", ev.Summary)
 		case mins == 1:
-			msg = fmt.Sprintf("Heads up: %s starts in 1 minute.", ev.Summary)
+			spoken = fmt.Sprintf("Heads up: %s starts in 1 minute.", ev.Summary)
+			visual = fmt.Sprintf("%s — in 1 min", ev.Summary)
 		default:
-			msg = fmt.Sprintf("Heads up: %s starts in %d minutes.", ev.Summary, mins)
+			spoken = fmt.Sprintf("Heads up: %s starts in %d minutes.", ev.Summary, mins)
+			visual = fmt.Sprintf("%s — in %d min", ev.Summary, mins)
 		}
 		if ev.Location != "" {
-			msg += " Location: " + ev.Location + "."
+			spoken += " Location: " + ev.Location + "."
 		}
 
-		count := SpeakToDevice(ctx, "", msg)
-		logger.Infof(ctx, "Calendar announce sent to %d device(s): %s", count, msg)
+		spokenCount := SpeakToDevice(ctx, "", spoken)
+		shownCount := web_socket.BroadcastTextToStackChans(ctx, "Calendar", visual)
+		logger.Infof(ctx, "Calendar announce: spoken on %d, shown on %d device(s): %s", spokenCount, shownCount, spoken)
 	}
 }
 
