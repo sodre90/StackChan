@@ -18,18 +18,11 @@ services:
   whisper:
     build:
       context: .
-      dockerfile: whisper/Dockerfile
+      dockerfile: whisper/Dockerfile.cpu
     ports:
       - "13000:13000"
     volumes:
       - whisper-models:/root/.cache/huggingface
-    deploy:
-      resources:
-        reservations:
-          devices:
-            - driver: nvidia
-              count: 1
-              capabilities: [gpu]
     restart: unless-stopped
 
   tts:
