@@ -51,18 +51,6 @@ const (
 
 	DeviceOffline byte = 0x16
 	DeviceOnline  byte = 0x17
-
-	StartAudioStream byte = 0x18
-	StopAudioStream  byte = 0x19
-)
-
-const (
-	// avatarAudioBurstFrames is how many Opus frames to send back-to-back before
-	// pacing, to build a small playback cushion on the device.
-	avatarAudioBurstFrames = 8
-	// avatarOpusFrameMs is the Opus frame duration; pacing matches realtime so the
-	// device's bounded decode queue (~4.8s) does not overflow on long announcements.
-	avatarOpusFrameMs = 60
 )
 
 var (
@@ -828,61 +816,6 @@ func BroadcastTextToStackChans(ctx context.Context, name, content string) int {
 		return true
 	})
 	return count
-}
-
-// stackChanConn is a snapshot of a connected device's write target.
-type stackChanConn struct {
-	conn *websocket.Conn
-	mu   *sync.RWMutex
-}
-
-// connectedStackChanConns snapshots all currently connected StackChan devices.
-func connectedStackChanConns() []stackChanConn {
-	var out []stackChanConn
-	stackChanClientPool.Range(func(_, value any) bool {
-		client := value.(*StackChanClient)
-		client.mu.RLock()
-		conn := client.Conn
-		client.mu.RUnlock()
-		if conn != nil {
-			out = append(out, stackChanConn{conn: conn, mu: client.mu})
-		}
-		return true
-	})
-	return out
-}
-
-// BroadcastAudioToStackChans plays a sequence of raw Opus frames (60ms, 16kHz SILK-WB)
-// on every connected StackChan device over the persistent avatar channel. The stream is
-// framed with StartAudioStream/StopAudioStream markers; the device decodes and plays it
-// even when idle. Frames are paced at ~realtime (after a short burst) so the device's
-// bounded decode queue does not overflow. Returns the number of devices reached.
-func BroadcastAudioToStackChans(ctx context.Context, frames [][]byte) int {
-	conns := connectedStackChanConns()
-	if len(conns) == 0 || len(frames) == 0 {
-		return 0
-	}
-
-	sendToAll := func(msgType byte, data []byte) {
-		msg := createMessage(msgType, data)
-		wsType := websocket.BinaryMessage
-		for _, c := range conns {
-			forwardMessage(ctx, c.conn, &wsType, msg, c.mu)
-		}
-	}
-
-	sendToAll(StartAudioStream, nil)
-	for i, frame := range frames {
-		if ctx.Err() != nil {
-			break
-		}
-		sendToAll(Opus, frame)
-		if i >= avatarAudioBurstFrames {
-			time.Sleep(avatarOpusFrameMs * time.Millisecond)
-		}
-	}
-	sendToAll(StopAudioStream, nil)
-	return len(conns)
 }
 
 // GetRandomStackChanDevice get Random StackChan Device list

@@ -1519,19 +1519,6 @@ func extractOpusFramesFromOGG(data []byte) ([][]byte, error) {
 	return frames, nil
 }
 
-// ttsAudioToOpusFrames converts TTS output (WAV or OGG/Opus) into individual raw
-// Opus frames, the same way sendAudioChunks does, for callers that need the frames
-// without an AIClient (e.g. pushing announcements over the avatar channel).
-func ttsAudioToOpusFrames(audioData []byte) ([][]byte, error) {
-	if len(audioData) == 0 {
-		return nil, fmt.Errorf("empty audio")
-	}
-	if len(audioData) >= 4 && string(audioData[0:4]) == "RIFF" {
-		return wavToOpusFrames(audioData)
-	}
-	return extractOpusFramesFromOGG(audioData)
-}
-
 // sendAudioChunks sends TTS audio to the ESP32 as individual Opus frames.
 // Auto-detects format: WAV (RIFF header) is encoded to Opus on the fly;
 // OGG/Opus is demuxed directly. The ESP32 decoder requires one Opus packet per message.
