@@ -8,7 +8,6 @@ package web_socket
 import (
 	"context"
 	"encoding/binary"
-	"encoding/json"
 	"errors"
 	"math/rand"
 	"net"
@@ -786,36 +785,6 @@ func createMessage(msgType byte, data []byte) *[]byte {
 // createStringMessage creates a binary message with a string payload
 func createStringMessage(msgType byte, data string) *[]byte {
 	return createMessage(msgType, []byte(data))
-}
-
-// BroadcastTextToStackChans pushes a speech-bubble TextMessage to every connected
-// StackChan device over the persistent avatar channel. The device renders it on its
-// face as "<name> says: <content>". This works even when the device is idle (the
-// avatar channel stays connected), unlike the on-demand AI audio channel.
-// Returns the number of devices the message reached.
-func BroadcastTextToStackChans(ctx context.Context, name, content string) int {
-	payload, err := json.Marshal(map[string]string{"name": name, "content": content})
-	if err != nil {
-		logger.Errorf(ctx, "BroadcastTextToStackChans: marshal failed: %v", err)
-		return 0
-	}
-
-	count := 0
-	stackChanClientPool.Range(func(_, value any) bool {
-		client := value.(*StackChanClient)
-		client.mu.RLock()
-		conn := client.Conn
-		client.mu.RUnlock()
-		if conn == nil {
-			return true
-		}
-		msg := createMessage(TextMessage, payload)
-		msgType := websocket.BinaryMessage
-		forwardMessage(ctx, conn, &msgType, msg, client.mu)
-		count++
-		return true
-	})
-	return count
 }
 
 // GetRandomStackChanDevice get Random StackChan Device list
