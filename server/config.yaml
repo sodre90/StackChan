@@ -22,9 +22,11 @@ llm_model: "gemini-3.1-flash-lite"
 # OpenAI-compatible API base URL for TTS (local Piper server)
 tts_base_url: "http://tts:14000/v1"
 
-# TTS model and voice (Piper local TTS — voice file baked into the tts container)
-tts_model: "piper"
-tts_voice: "hu_HU-anna-medium"
+# TTS via edge-tts (Microsoft). Multilingual voice handles Hungarian + English
+# (e.g. English meeting titles) in one utterance, auto-switching by text.
+# Revert to local Piper: set dockerfile back to piper/Dockerfile and voice to hu_HU-anna-medium.
+tts_model: "edge"
+tts_voice: "en-US-AvaMultilingualNeural"
 tts_response_format: "opus"
 
 # System prompt

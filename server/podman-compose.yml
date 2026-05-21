@@ -30,7 +30,8 @@ services:
   tts:
     build:
       context: .
-      dockerfile: piper/Dockerfile
+      # edge-tts (Microsoft) for multilingual voices (HU + EN). Was piper/Dockerfile.
+      dockerfile: tts/Dockerfile
     ports:
       - "14000:14000"
     restart: unless-stopped
