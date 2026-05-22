@@ -153,6 +153,29 @@ var (
 				})
 			})
 
+			// Test endpoint: inject text as if the user had spoken it and run the
+			// FULL LLM -> streaming multi-sentence TTS pipeline to the device(s),
+			// bypassing the mic/Whisper. Unlike /test/speak (single TTS call), this
+			// exercises the per-sentence pipeline, so use it to test voice stutter
+			// from the keyboard.
+			//   GET/POST /xiaozhi/test/chat?text=...&mac=...
+			// text required; mac optional (all connected devices if empty).
+			s.BindHandler("/xiaozhi/test/chat", func(r *ghttp.Request) {
+				text := r.Get("text").String()
+				if text == "" {
+					r.Response.WriteStatus(http.StatusBadRequest)
+					r.Response.WriteJson(g.Map{"error": "text parameter is required"})
+					return
+				}
+				mac := r.Get("mac").String()
+				count := ai.ChatToDevice(mac, text)
+				r.Response.WriteJson(g.Map{
+					"sent_to_devices": count,
+					"text":            text,
+					"mac":             mac,
+				})
+			})
+
 			// Test endpoint: list currently connected AI device MACs.
 			s.BindHandler("/xiaozhi/test/devices", func(r *ghttp.Request) {
 				macs := ai.GetActiveClients()

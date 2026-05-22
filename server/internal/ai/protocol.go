@@ -1829,6 +1829,38 @@ func SpeakToDeviceWithVoice(ctx context.Context, targetMac, text, voice string) 
 	return sent
 }
 
+// ChatToDevice injects text as if the user had spoken it and runs the full
+// LLM -> streaming multi-sentence TTS pipeline to the matching device(s),
+// bypassing ASR/mic. Unlike SpeakToDevice (one TTS call), this drives the
+// per-sentence pipeline, so it's the path for testing voice stutter without
+// talking. Returns the number of devices targeted. Runs the reply on each
+// client's connection context (not the caller's) so it survives the HTTP
+// request returning and is cancelled if the device disconnects.
+func ChatToDevice(targetMac, text string) int {
+	text = strings.TrimSpace(text)
+	if text == "" {
+		return 0
+	}
+
+	clientsMu.RLock()
+	targets := make([]*AIClient, 0, len(activeClients))
+	for mac, c := range activeClients {
+		if targetMac == "" || mac == targetMac {
+			targets = append(targets, c)
+		}
+	}
+	clientsMu.RUnlock()
+
+	for _, client := range targets {
+		client.mu.Lock()
+		client.lastRealSpeechAt = time.Now()
+		client.mu.Unlock()
+		sendSTT(client.ctx, client, text)
+		go processLLMResponse(client.ctx, client, text)
+	}
+	return len(targets)
+}
+
 // sentenceAccumulator buffers streaming LLM tokens and yields complete sentences.
 type sentenceAccumulator struct {
 	buf strings.Builder
