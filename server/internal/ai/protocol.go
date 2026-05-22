@@ -44,9 +44,9 @@ const (
 	// The firmware buffers up to 4.8s of Opus (MAX_DECODE_PACKETS_IN_QUEUE=80) and
 	// applies backpressure, so a deep lead is safe and absorbs WiFi jitter spikes
 	// (which were heard as occasional mid-sentence pauses at the old 0.9s lead).
-	opusBurstFrames = 25   // ~1.5s initial cushion
-	opusPaceMs      = 58   // 2ms/frame faster than realtime → ~33ms/sec buffer growth
-	opusMaxLeadMs   = 2500 // hard cap on accumulated lead (~40 frames ≈ 2.5s ahead)
+	opusBurstFrames = 10  // ~600ms initial cushion
+	opusPaceMs      = 58  // 2ms/frame faster than realtime → ~33ms/sec buffer growth
+	opusMaxLeadMs   = 900 // hard cap on accumulated lead (~15 frames ≈ 0.9s ahead)
 
 	// VAD — inline RMS-based detector in processASRAndLLM.
 	// speechPreBuffer: packets kept before detected onset to avoid clipping first phoneme.
