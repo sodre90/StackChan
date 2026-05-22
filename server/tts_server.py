@@ -65,7 +65,18 @@ async def tts(request: Request):
 
     mp3_data = b"".join(mp3_chunks)
 
-    # Convert to Opus using ffmpeg (16kHz mono, compatible with xiaozhi-esp32)
+    # Convert to Opus with ffmpeg. ffmpeg is blocking, so run it in a worker thread
+    # via asyncio.to_thread — otherwise it blocks the single uvicorn event loop and
+    # concurrent TTS requests serialise (and starve each other's edge-tts coroutine).
+    opus_data = await asyncio.to_thread(_mp3_to_opus, mp3_data)
+
+    logger.info(f"TTS complete: {len(mp3_data)} bytes MP3 -> {len(opus_data)} bytes Opus")
+    return Response(content=opus_data, media_type="audio/ogg")
+
+
+def _mp3_to_opus(mp3_data: bytes) -> bytes:
+    """Blocking MP3->Opus(OGG) conversion (16kHz mono, xiaozhi-esp32 compatible).
+    Runs in a thread so the async event loop stays free for other requests."""
     with tempfile.NamedTemporaryFile(suffix=".mp3", delete=False) as tmp_in:
         tmp_in.write(mp3_data)
         tmp_in_path = tmp_in.name
@@ -93,14 +104,11 @@ async def tts(request: Request):
             raise HTTPException(status_code=500, detail="ffmpeg conversion failed")
 
         with open(tmp_out_path, "rb") as f:
-            opus_data = f.read()
+            return f.read()
     finally:
         os.unlink(tmp_in_path)
         if os.path.exists(tmp_out_path):
             os.unlink(tmp_out_path)
-
-    logger.info(f"TTS complete: {len(mp3_data)} bytes MP3 -> {len(opus_data)} bytes Opus")
-    return Response(content=opus_data, media_type="audio/ogg")
 
 
 @app.get("/v1/models")

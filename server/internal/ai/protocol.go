@@ -43,9 +43,9 @@ const (
 	// caps how far ahead the schedule can run — beyond that we sleep the excess
 	// and stop growing the buffer, preventing TCP backpressure (which previously
 	// manifested as crackling when we sent too fast continuously).
-	opusBurstFrames = 16   // ~960ms initial cushion
-	opusPaceMs      = 58   // 2ms/frame faster than realtime → ~33ms/sec buffer growth
-	opusMaxLeadMs   = 1500 // hard cap on accumulated lead (~25 frames ≈ 1.5s ahead)
+	opusBurstFrames = 10  // ~600ms initial cushion
+	opusPaceMs      = 58  // 2ms/frame faster than realtime → ~33ms/sec buffer growth
+	opusMaxLeadMs   = 900 // hard cap on accumulated lead (~15 frames ≈ 0.9s ahead)
 
 	// VAD — inline RMS-based detector in processASRAndLLM.
 	// speechPreBuffer: packets kept before detected onset to avoid clipping first phoneme.
@@ -102,6 +102,12 @@ type AIClient struct {
 
 	// Speaking cancellation — cancelled when device sends abort
 	speakCancel context.CancelFunc
+
+	// replyMu serialises whole audio replies to this device. A reply (LLM->TTS)
+	// and a pushed announcement each hold it for their full duration, so their
+	// Opus frames never interleave on the wire (interleaving = garbled/stuttering
+	// playback, since the device just decodes frames in arrival order).
+	replyMu sync.Mutex
 
 	// audioPlayoutDeadline is when the device is expected to finish playing all
 	// audio frames that have been written to the WebSocket so far in the current
@@ -611,6 +617,11 @@ vadLoop:
 // For streaming LLM without tools, TTS fires per sentence as tokens arrive.
 // For tools / non-streaming, the full response is split into sentences after the fact.
 func processLLMResponse(ctx context.Context, client *AIClient, userText string) {
+	// Serialise the whole reply against other replies/announcements so their audio
+	// frames don't interleave on this device.
+	client.replyMu.Lock()
+	defer client.replyMu.Unlock()
+
 	addMessageToContext(ctx, client, "user", userText)
 
 	// Create a speak context so handleAbort can cancel mid-playback.
@@ -1798,6 +1809,10 @@ func SpeakToDeviceWithVoice(ctx context.Context, targetMac, text, voice string) 
 
 	sent := 0
 	for _, client := range targets {
+		// Hold the per-device reply lock so this announcement doesn't interleave
+		// its frames with an in-progress LLM reply on the same device.
+		client.replyMu.Lock()
+
 		client.mu.Lock()
 		client.audioPlayoutDeadline = time.Time{}
 		client.mu.Unlock()
@@ -1824,6 +1839,7 @@ func SpeakToDeviceWithVoice(ctx context.Context, targetMac, text, voice string) 
 		client.mu.Unlock()
 
 		sendTTS(ctx, client, "stop", "")
+		client.replyMu.Unlock()
 		sent++
 	}
 	return sent
