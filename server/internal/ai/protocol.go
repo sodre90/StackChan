@@ -43,9 +43,9 @@ const (
 	// caps how far ahead the schedule can run — beyond that we sleep the excess
 	// and stop growing the buffer, preventing TCP backpressure (which previously
 	// manifested as crackling when we sent too fast continuously).
-	opusBurstFrames = 10  // ~600ms initial cushion
-	opusPaceMs      = 58  // 2ms/frame faster than realtime → ~33ms/sec buffer growth
-	opusMaxLeadMs   = 900 // hard cap on accumulated lead (~15 frames ≈ 0.9s ahead)
+	opusBurstFrames = 16   // ~960ms initial cushion
+	opusPaceMs      = 58   // 2ms/frame faster than realtime → ~33ms/sec buffer growth
+	opusMaxLeadMs   = 1500 // hard cap on accumulated lead (~25 frames ≈ 1.5s ahead)
 
 	// VAD — inline RMS-based detector in processASRAndLLM.
 	// speechPreBuffer: packets kept before detected onset to avoid clipping first phoneme.
@@ -688,6 +688,85 @@ func processLLMResponse(ctx context.Context, client *AIClient, userText string) 
 	sendTTS(ctx, client, "stop", "")
 }
 
+// ttsJob is one sentence rendered to Opus by the TTS worker pool. done is closed
+// once audio is populated (or rendering was skipped/cancelled).
+type ttsJob struct {
+	sentence string
+	audio    []byte
+	done     chan struct{}
+}
+
+// ttsWorkerCount is how many sentences are rendered concurrently. Cloud edge-tts
+// takes ~1–1.7s per sentence regardless of length, so a single serial renderer
+// can't stay ahead of realtime playback for short sentences — the device's jitter
+// buffer underruns and you hear a stutter between sentences. Rendering several
+// sentences in parallel keeps the next sentence's audio ready before the current
+// one finishes playing.
+const ttsWorkerCount = 3
+
+// ttsPipeline renders sentences to Opus concurrently while preserving playback
+// order. submit() queues a sentence; a player goroutine sends each sentence's
+// audio in submission order as soon as it is ready, so generation overlaps
+// playback. close() drains and blocks until all queued audio has finished playing.
+type ttsPipeline struct {
+	jobCh      chan *ttsJob
+	orderCh    chan *ttsJob
+	playerDone chan struct{}
+}
+
+func newTTSPipeline(ctx context.Context, client *AIClient) *ttsPipeline {
+	p := &ttsPipeline{
+		jobCh:      make(chan *ttsJob, 16),
+		orderCh:    make(chan *ttsJob, 64),
+		playerDone: make(chan struct{}),
+	}
+
+	// Worker pool: render sentences concurrently.
+	for i := 0; i < ttsWorkerCount; i++ {
+		go func() {
+			for job := range p.jobCh {
+				if aiConfig.EnableTTS && ctx.Err() == nil {
+					job.audio = generateSpeech(ctx, job.sentence)
+				}
+				close(job.done)
+			}
+		}()
+	}
+
+	// Player: send audio in submission order. audioPlayoutDeadline carries across
+	// sendAudioChunks calls, so pacing stays continuous from one sentence to the next.
+	go func() {
+		defer close(p.playerDone)
+		for job := range p.orderCh {
+			<-job.done
+			if ctx.Err() != nil {
+				continue // drain so workers can exit
+			}
+			if len(job.audio) > 0 {
+				sendAudioChunks(ctx, client, job.audio)
+			}
+		}
+	}()
+
+	return p
+}
+
+// submit queues a sentence; submission order is playback order. Rendering happens
+// in the background, so this returns quickly, applying backpressure only if the
+// queues fill.
+func (p *ttsPipeline) submit(sentence string) {
+	job := &ttsJob{sentence: sentence, done: make(chan struct{})}
+	p.orderCh <- job // reserve the playback slot first to preserve order
+	p.jobCh <- job   // hand to a worker
+}
+
+// close signals no more sentences and blocks until all queued audio has played.
+func (p *ttsPipeline) close() {
+	close(p.jobCh)
+	close(p.orderCh)
+	<-p.playerDone
+}
+
 // streamLLMSentences streams the LLM response and calls TTS for each sentence as it completes.
 // Returns the full assembled response text.
 func streamLLMSentences(ctx context.Context, client *AIClient) string {
@@ -741,36 +820,7 @@ func streamLLMSentences(ctx context.Context, client *AIClient) string {
 	var acc sentenceAccumulator
 	var assembled strings.Builder
 
-	type ttsJob struct {
-		sentence string
-		audio    []byte
-	}
-	sentenceCh := make(chan string, 8)
-	resultCh := make(chan ttsJob, 8)
-	playerDone := make(chan struct{})
-
-	go func() {
-		for s := range sentenceCh {
-			var audio []byte
-			if aiConfig.EnableTTS {
-				audio = generateSpeech(ctx, s)
-			}
-			resultCh <- ttsJob{sentence: s, audio: audio}
-		}
-		close(resultCh)
-	}()
-
-	go func() {
-		defer close(playerDone)
-		for job := range resultCh {
-			if ctx.Err() != nil {
-				continue
-			}
-			if len(job.audio) > 0 {
-				sendAudioChunks(ctx, client, job.audio)
-			}
-		}
-	}()
+	pipeline := newTTSPipeline(ctx, client)
 
 	speak := func(sentence string) {
 		if ctx.Err() != nil {
@@ -783,7 +833,7 @@ func streamLLMSentences(ctx context.Context, client *AIClient) string {
 		assembled.WriteString(sentence)
 		assembled.WriteByte(' ')
 		sendTTS(ctx, client, "sentence_start", sentence)
-		sentenceCh <- sentence
+		pipeline.submit(sentence)
 	}
 
 	scanner := bufio.NewScanner(resp.Body)
@@ -826,8 +876,7 @@ func streamLLMSentences(ctx context.Context, client *AIClient) string {
 		speak(remainder)
 	}
 
-	close(sentenceCh)
-	<-playerDone
+	pipeline.close()
 
 	response := strings.TrimSpace(assembled.String())
 	if response != "" {
