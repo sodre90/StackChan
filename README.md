@@ -69,12 +69,22 @@ merged on top of `config.yaml` at startup.
 
 ### Language
 
-The stack ships defaulting to **English**. Language is controlled by three keys in
-`server/config.yaml`; override any of them in `additional_config.yaml` to switch languages
-without editing the committed config:
+The stack ships defaulting to **English**, with a ready-made **Hungarian** variant. Pick one
+by the compose file you run:
+
+| | English (default) | Hungarian |
+|---|---|---|
+| Compose | `podman-compose.yml` / `docker-compose.yml` | `podman-compose.hu.yml` / `docker-compose.hu.yml` |
+| Config | `config.yaml` | `config.hu.yaml` |
+| Whisper model | `large-v3-turbo` | `sarpba/whisper-base-hungarian_v1` |
+
+They use the same ports — run one at a time. Secrets in `additional_config.yaml` apply to both.
+
+For any other language, edit the language keys in `config.yaml`:
 
 - `asr_language` — Whisper transcription language. ISO 639-1 code (e.g. `"en"`, `"hu"`) or
-  `"auto"` to auto-detect.
+  `"auto"` to auto-detect. (Match it with a Whisper model that supports the language — see the
+  whisper Dockerfiles.)
 - `tts_voice` — edge-tts voice; the voice selects the spoken language (e.g. `en-US-AvaNeural`,
   `hu-HU-NoemiNeural`, or a multilingual voice like `en-US-AvaMultilingualNeural` that
   auto-switches by text). See the [edge-tts voice list](https://github.com/rany2/edge-tts).

@@ -19,6 +19,7 @@ services:
     build:
       context: .
       dockerfile: whisper/Dockerfile.cpu
+    image: stackchan-whisper-en
     ports:
       - "13000:13000"
     volumes:
@@ -28,7 +29,9 @@ services:
   tts:
     build:
       context: .
-      dockerfile: piper/Dockerfile
+      # edge-tts (Microsoft) — voice-driven, multilingual. For local Piper, use
+      # piper/Dockerfile instead and set a Piper voice in config.yaml.
+      dockerfile: tts/Dockerfile
     ports:
       - "14000:14000"
     restart: unless-stopped

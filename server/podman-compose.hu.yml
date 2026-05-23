@@ -1,3 +1,13 @@
+# StackChan — Hungarian variant (Podman).
+#
+#   podman-compose -f podman-compose.hu.yml up -d --build
+#
+# Same as podman-compose.yml but uses the Hungarian-tuned Whisper model
+# (whisper/Dockerfile.cpu.hu) and the Hungarian config (config.hu.yaml).
+# It binds the same ports (12800/13000/14000), so run EITHER this OR the default
+# English stack — not both. To switch:
+#   podman-compose -f podman-compose.yml down
+#   podman-compose -f podman-compose.hu.yml up -d --build
 services:
   stackchan:
     build:
@@ -6,13 +16,12 @@ services:
     ports:
       - "12800:12800"
     volumes:
-      - ./config.yaml:/app/config.yaml:ro
+      - ./config.hu.yaml:/app/config.yaml:ro
       - ./additional_config.yaml:/app/additional_config.yaml:ro
     depends_on:
       - whisper
       - tts
     # host.containers.internal resolves to the host in Podman 4.x+ (rootless & rootful).
-    # Needed only if config.yaml points to a host-local service (e.g. llama-server).
     extra_hosts:
       - "host.containers.internal:host-gateway"
     restart: unless-stopped
@@ -20,8 +29,8 @@ services:
   whisper:
     build:
       context: .
-      dockerfile: whisper/Dockerfile.cpu
-    image: localhost/stackchan-whisper-en
+      dockerfile: whisper/Dockerfile.cpu.hu
+    image: localhost/stackchan-whisper-hu
     ports:
       - "13000:13000"
     volumes:
@@ -31,7 +40,6 @@ services:
   tts:
     build:
       context: .
-      # edge-tts (Microsoft) for multilingual voices (HU + EN). Was piper/Dockerfile.
       dockerfile: tts/Dockerfile
     ports:
       - "14000:14000"

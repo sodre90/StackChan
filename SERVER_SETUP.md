@@ -2,9 +2,18 @@
 
 End-to-end guide for running the StackChan AI server stack on a Linux box using `podman-compose`. The stack is fully self-contained — three containers handle the device WebSocket, speech-to-text (Whisper), and text-to-speech (edge-tts). No host-side Go, Python, or model installs are required.
 
-The repo defaults to **English** voice interaction with Google's **Gemini** API as the LLM (with automatic fallback through `llm_fallback_models` on rate-limits). Personal overrides — including switching the language to Hungarian — go in `additional_config.yaml`. Both can be swapped — see [Customizing the stack](#customizing-the-stack).
+The repo defaults to **English** voice interaction with Google's **Gemini** API as the LLM (with automatic fallback through `llm_fallback_models` on rate-limits). A ready-made **Hungarian** variant ships alongside it — see below. Other settings can also be swapped — see [Customizing the stack](#customizing-the-stack).
 
-> Note: the bundled Whisper image (`whisper/Dockerfile.cpu`) ships a **Hungarian-tuned** base model. For accurate English (or another language), swap the model — see [Different language / Whisper model](#different-language--whisper-model).
+### English vs Hungarian
+
+| | Default (English) | Hungarian |
+|---|---|---|
+| Compose | `podman-compose.yml` | `podman-compose.hu.yml` |
+| Whisper model | `large-v3-turbo` (multilingual) | `sarpba/whisper-base-hungarian_v1` |
+| Config | `config.yaml` | `config.hu.yaml` |
+| TTS voice | `en-US-AvaNeural` | `en-US-AvaMultilingualNeural` |
+
+Both stacks bind the same ports, so run **one at a time**. Secrets live in `additional_config.yaml` and apply to both. The rest of this guide uses the default (English) stack — for Hungarian, just swap `-f podman-compose.yml` → `-f podman-compose.hu.yml` in every command.
 
 ---
 
@@ -104,7 +113,7 @@ brave_search_api_key: "BSA...optional, enables real web search..."
 ha_token: "eyJ...optional, long-lived Home Assistant token..."
 ```
 
-You can also override **non-secret** keys here to avoid editing the tracked `config.yaml`. For example, to run in Hungarian, add `asr_language: "hu"`, `tts_voice: "hu-HU-NoemiNeural"` (or the multilingual `en-US-AvaMultilingualNeural`), and a Hungarian `system_prompt`.
+You can also override **non-secret** keys here to avoid editing the tracked config. (For a complete Hungarian setup, use the Hungarian stack from [English vs Hungarian](#english-vs-hungarian) rather than overriding individual keys.)
 
 Both files are bind-mounted read-only into the `stackchan` container at `/app/config.yaml` and `/app/additional_config.yaml`.
 
@@ -116,7 +125,7 @@ Both files are bind-mounted read-only into the `stackchan` container at `/app/co
 podman-compose -f podman-compose.yml up -d --build
 ```
 
-> **Important:** always pass `-f podman-compose.yml`. If you omit it, `podman-compose` picks up `docker-compose.yml` instead, which targets the CUDA build of Whisper and will fail on a CPU-only host.
+> **Important:** always pass an explicit `-f <file>` (`podman-compose.yml` for English, `podman-compose.hu.yml` for Hungarian). With no `-f`, `podman-compose` may pick up `docker-compose.yml` instead.
 
 First build takes ~5–10 minutes (pulls Python base image, installs faster-whisper and edge-tts). Subsequent builds use the layer cache and finish in seconds.
 
@@ -206,19 +215,19 @@ llm_model:     "your-local-model-alias"
 
 ### Different language / Whisper model
 
-Edit `server/whisper/Dockerfile.cpu` and change the `CMD` line:
+For Hungarian, use the Hungarian stack (see [English vs Hungarian](#english-vs-hungarian)) — no edits needed. For a *different* language or model, edit the `CMD` in the relevant Whisper Dockerfile (`whisper/Dockerfile.cpu` for English, `whisper/Dockerfile.cpu.hu` for Hungarian):
 
 ```dockerfile
 CMD ["python3", "whisper_server.py", \
-     "--model", "openai/whisper-large-v3-turbo", \
+     "--model", "large-v3-turbo", \
      "--device", "cpu", \
-     "--compute-type", "int8_float32", \
+     "--compute-type", "int8", \
      "--port", "13000"]
 ```
 
-If the model ships a pre-quantized CTranslate2 build in a HuggingFace subfolder, point at it with `--model-subfolder quants/int8_bfloat16` (mirrors what the default `sarpba/whisper-base-hungarian_v1` setup does). Otherwise `whisper_server.py` will auto-convert the PyTorch model on first start.
+`--model` accepts a faster-whisper shorthand (`tiny`, `base`, `small`, `large-v3`, `large-v3-turbo`) or a HuggingFace repo id. If the model ships a pre-quantized CTranslate2 build in a subfolder, add `--model-subfolder quants/int8_bfloat16` (as the Hungarian model does); otherwise `whisper_server.py` converts it on first start.
 
-Also update `asr_language` in `config.yaml`. Set `asr_initial_prompt: ""` unless you're on a large model — small Whisper variants collapse to `.` outputs when given a long priming prompt.
+Also update `asr_language` in the matching config (`config.yaml` / `config.hu.yaml`). Keep `asr_initial_prompt: ""` unless you're on a large model — small Whisper variants collapse to `.` outputs when given a long priming prompt.
 
 ### Different TTS voice / language
 
@@ -251,16 +260,20 @@ A previous container from the old image is still running. `podman rm -f <contain
 
 ```
 server/
-├── podman-compose.yml      ← compose file (CPU build) — use with -f
-├── docker-compose.yml      ← CUDA build (NVIDIA GPU on host)
-├── config.yaml             ← main config (tracked)
+├── podman-compose.yml      ← English stack (Podman) — use with -f
+├── podman-compose.hu.yml   ← Hungarian stack (Podman)
+├── docker-compose.yml      ← English stack (Docker Compose)
+├── docker-compose.hu.yml   ← Hungarian stack (Docker Compose)
+├── config.yaml             ← English config (tracked)
+├── config.hu.yaml          ← Hungarian config (tracked)
 ├── additional_config.yaml  ← secrets (gitignored — create yourself)
 ├── Dockerfile              ← stackchan (Go) image
 ├── whisper/
-│   ├── Dockerfile.cpu      ← CPU Whisper image (used by podman-compose)
+│   ├── Dockerfile.cpu      ← English Whisper image (large-v3-turbo)
+│   ├── Dockerfile.cpu.hu   ← Hungarian Whisper image (sarpba base)
 │   └── Dockerfile          ← CUDA Whisper image
 ├── whisper_server.py       ← faster-whisper HTTP wrapper
-├── tts/Dockerfile          ← edge-tts image (used by podman-compose)
+├── tts/Dockerfile          ← edge-tts image (used by both stacks)
 ├── tts_server.py           ← edge-tts HTTP wrapper
 ├── piper/Dockerfile        ← Piper TTS image (optional alternative)
 └── piper_server.py         ← Piper HTTP wrapper

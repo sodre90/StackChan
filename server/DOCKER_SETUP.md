@@ -36,8 +36,11 @@ docker compose up
 
 On first run this will:
 1. Build all three images (~3–5 minutes)
-2. Download the Whisper large-v3 model from HuggingFace (~3 GB) — only once
+2. Download the Whisper model from HuggingFace (English `large-v3-turbo`, ~1.5 GB) — only once
 3. Start all containers
+
+> For Hungarian, use `docker compose -f docker-compose.hu.yml up` instead — it uses the
+> Hungarian-tuned Whisper model and `config.hu.yaml`. Run one stack at a time (shared ports).
 
 To run in the background:
 
@@ -80,12 +83,12 @@ Built from `Dockerfile` — multi-stage Go build.
 
 ### whisper (port 13000)
 
-Built from `whisper/Dockerfile` — Python + faster-whisper.
+Built from `whisper/Dockerfile.cpu` (English) or `whisper/Dockerfile.cpu.hu` (Hungarian) — Python + faster-whisper.
 
 - `POST /v1/audio/transcriptions` — transcribe a WAV file
 - `GET /health` — liveness check
 - Model files cached in the `whisper-models` Docker volume (persists across restarts)
-- Defaults to `large-v3`; change in `whisper/Dockerfile` CMD if you want a smaller model
+- English defaults to `large-v3-turbo`; change the `--model` in the matching Whisper Dockerfile to use a smaller one
 
 ### tts (port 14000)
 

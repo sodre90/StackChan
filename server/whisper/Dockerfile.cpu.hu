@@ -8,17 +8,18 @@ WORKDIR /app
 RUN pip3 install --no-cache-dir \
         torch --index-url https://download.pytorch.org/whl/cpu
 RUN pip3 install --no-cache-dir \
-        "faster-whisper>=1.1.0" \
+        "faster-whisper>=1.0.3" \
         "transformers>=4.40.0" \
         fastapi uvicorn pydantic python-multipart
 
 COPY whisper_server.py .
 EXPOSE 13000
-# Default (English) stack: large-v3-turbo — multilingual, high accuracy. faster-whisper
-# downloads the pre-converted CTranslate2 weights on first start (cached in the
-# whisper-models volume). For the Hungarian-tuned model use whisper/Dockerfile.cpu.hu.
+# Hungarian-tuned Whisper (sarpba/whisper-base-hungarian_v1), pre-quantized CTranslate2
+# build in the quants/int8_bfloat16 subfolder. Much smaller/faster than large-v3 and
+# more accurate for Hungarian. Used by the *.hu.yml compose files.
 CMD ["python3", "whisper_server.py", \
-     "--model", "large-v3-turbo", \
+     "--model", "sarpba/whisper-base-hungarian_v1", \
+     "--model-subfolder", "quants/int8_bfloat16", \
      "--device", "cpu", \
-     "--compute-type", "int8", \
+     "--compute-type", "int8_float32", \
      "--port", "13000"]

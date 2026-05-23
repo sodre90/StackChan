@@ -146,6 +146,10 @@ The AI pipeline is configured in `server/config.yaml`. Open it to change:
 - **Personality** — `system_prompt`
 - **Voice** — `tts_voice` (any [edge-tts voice](https://github.com/rany2/edge-tts))
 
+**Want Hungarian instead of English?** A ready-made variant ships alongside the default —
+run `docker compose -f docker-compose.hu.yml up` (it uses the Hungarian-tuned Whisper model and
+`config.hu.yaml`). Run only one stack at a time; they share the same ports.
+
 See [server/CONFIGURATION.md](server/CONFIGURATION.md) for the full reference.
 
 ---
