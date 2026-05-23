@@ -26,7 +26,7 @@ this fork.
 - **Local ASR** — Whisper via `faster-whisper`, or `mlx-whisper` for Apple-Silicon GPU; a
   `wav2vec2` server is also included as an alternative.
 - **Local TTS** — `edge-tts` (Microsoft neural voices) by default, with a Piper alternative.
-  Output is 16 kHz mono Opus, matched to the firmware's audio pipeline. Defaults to Hungarian.
+  Output is 16 kHz mono Opus, matched to the firmware's audio pipeline.
 - **MCP tools** — web search, weather, crypto/stock prices, and robot control: head servos, RGB
   LEDs, facial expressions, dances, and reminders.
 - **Home Assistant integration** — turn devices on/off, run scripts, and query entity state.
@@ -42,9 +42,9 @@ this fork.
 
 ```
   ┌──────────────┐   WebSocket    ┌────────────────────────────────────────┐
-  │  StackChan    │ ◀────────────▶ │  Go server (:12800)                     │
-  │  (CoreS3)     │   Opus audio   │  OTA · /xiaozhi/ws · AI pipeline · MCP   │
-  └──────────────┘                └───────┬───────────────┬─────────────────┘
+  │  StackChan   │ ◀────────────▶ │  Go server (:12800)                    │
+  │  (CoreS3)    │   Opus audio   │  OTA · /xiaozhi/ws · AI pipeline · MCP │
+  └──────────────┘                └───────┬───────────────┬────────────────┘
                                           │               │
                               ┌───────────▼──┐   ┌────────▼─────────┐   ┌──────────────┐
                               │ Whisper ASR  │   │  LLM             │   │  edge-tts    │
@@ -66,6 +66,22 @@ this fork.
 
 Secrets (API keys, OAuth tokens) go in `server/additional_config.yaml` (gitignored), which is
 merged on top of `config.yaml` at startup.
+
+### Language
+
+The stack ships defaulting to **English**. Language is controlled by three keys in
+`server/config.yaml`; override any of them in `additional_config.yaml` to switch languages
+without editing the committed config:
+
+- `asr_language` — Whisper transcription language. ISO 639-1 code (e.g. `"en"`, `"hu"`) or
+  `"auto"` to auto-detect.
+- `tts_voice` — edge-tts voice; the voice selects the spoken language (e.g. `en-US-AvaNeural`,
+  `hu-HU-NoemiNeural`, or a multilingual voice like `en-US-AvaMultilingualNeural` that
+  auto-switches by text). See the [edge-tts voice list](https://github.com/rany2/edge-tts).
+- `system_prompt` — instruct the model which language to reply in.
+
+(Proactive Google Calendar reminders are currently phrased in Hungarian in code, independently
+of these settings.)
 
 ---
 

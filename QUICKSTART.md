@@ -116,7 +116,8 @@ List USB ports: `ls /dev/cu.usb*` (macOS) or `ls /dev/ttyUSB*` (Linux).
 
 The AI pipeline is configured in `server/config.yaml`. Open it to change:
 
-- **Language** — `asr_language` and `tts_voice` (default: Hungarian)
+- **Language** — `asr_language` (Whisper), `tts_voice` (edge-tts voice), and the response
+  language in `system_prompt` (default: English; override in `additional_config.yaml`)
 - **LLM model** — `llm_model` (must match what you pulled in Ollama)
 - **Personality** — `system_prompt`
 - **Voice** — `tts_voice` (any [edge-tts voice](https://github.com/rany2/edge-tts))

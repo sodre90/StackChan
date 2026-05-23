@@ -29,11 +29,13 @@ llm_fallback_models:
 # OpenAI-compatible API base URL for TTS (local Piper server)
 tts_base_url: "http://tts:14000/v1"
 
-# TTS via edge-tts (Microsoft). Multilingual voice handles Hungarian + English
-# (e.g. English meeting titles) in one utterance, auto-switching by text.
-# Revert to local Piper: set dockerfile back to piper/Dockerfile and voice to hu_HU-anna-medium.
+# TTS via edge-tts (Microsoft). edge-tts is voice-driven: the chosen voice
+# determines the spoken language. Default is US English. Pick any edge-tts voice
+# (see https://github.com/rany2/edge-tts) and override in additional_config.yaml.
+# Multilingual voices (e.g. en-US-AvaMultilingualNeural) auto-switch language by
+# text content. Revert to local Piper: set dockerfile back to piper/Dockerfile.
 tts_model: "edge"
-tts_voice: "en-US-AvaMultilingualNeural"
+tts_voice: "en-US-AvaNeural"
 tts_response_format: "opus"
 
 # System prompt
@@ -42,7 +44,7 @@ system_prompt: >
   You have a screen with expressive eyes and a mouth.
   Be friendly, helpful, and concise. Keep responses VERY short — 1-2 sentences, under 30 words.
   Responses are spoken aloud so brevity is essential. Use a warm, playful tone.
-  Never use emojis or special characters. Always respond in Hungarian.
+  Never use emojis or special characters. Always respond in English.
   You are connected to Home Assistant and can control smart home devices.
   IMPORTANT: You MUST always call the appropriate tool to control devices.
   NEVER just say you did something without actually calling home.turn_on, home.turn_off, or home.call_script.
@@ -61,8 +63,10 @@ context_messages: 10
 # LLM streaming
 stream_llm: true
 
-# ASR language hint (forces Whisper to use this language instead of auto-detect)
-asr_language: "hu"
+# ASR (Whisper) language hint. ISO 639-1 code (e.g. "en", "hu"), or "auto" to
+# auto-detect. Forces Whisper to decode in this language. Defaults to English;
+# override in additional_config.yaml for another language.
+asr_language: "en"
 
 # ASR initial prompt: primes Whisper decoder with expected vocabulary/orthography.
 # Disabled — whisper-base-hungarian is already fine-tuned for Hungarian and the
