@@ -17,7 +17,14 @@ asr_model: "whisper"
 
 # LLM model name (must match the --alias passed to llama-server)
 #llm_model: "Qwen3.6-35B-A3B"
-llm_model: "gemini-3.1-flash-lite"
+llm_model: "gemini-3.5-flash"
+
+# Gemini fallback chain: tried in order after llm_model when the primary is
+# rate-limited (HTTP 429) or unavailable (5xx). Each model has its own quota.
+llm_fallback_models:
+  - "gemini-3.1-flash-lite"
+  - "gemma-4-26b-a4b-it"
+  - "gemma-4-31b-it"
 
 # OpenAI-compatible API base URL for TTS (local Piper server)
 tts_base_url: "http://tts:14000/v1"

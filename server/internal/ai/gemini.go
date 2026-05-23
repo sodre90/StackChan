@@ -22,16 +22,93 @@ func systemPromptWithDate(base string) string {
 	return "Today's date is " + dateStr + ".\n\n" + base
 }
 
-func geminiGenerateURL() string {
+func geminiGenerateURL(model string) string {
 	base := geminiDefaultBaseURL
 	return fmt.Sprintf("%s/models/%s:generateContent?key=%s",
-		base, aiConfig.LLMModel, aiConfig.APIKey)
+		base, model, aiConfig.APIKey)
 }
 
-func geminiStreamURL() string {
+func geminiStreamURL(model string) string {
 	base := geminiDefaultBaseURL
 	return fmt.Sprintf("%s/models/%s:streamGenerateContent?alt=sse&key=%s",
-		base, aiConfig.LLMModel, aiConfig.APIKey)
+		base, model, aiConfig.APIKey)
+}
+
+// geminiModelChain returns the models to try in priority order: the primary
+// LLMModel first, then LLMFallbackModels. Empties and duplicates are removed.
+func geminiModelChain() []string {
+	chain := make([]string, 0, 1+len(aiConfig.LLMFallbackModels))
+	seen := make(map[string]bool)
+	add := func(m string) {
+		m = strings.TrimSpace(m)
+		if m != "" && !seen[m] {
+			seen[m] = true
+			chain = append(chain, m)
+		}
+	}
+	add(aiConfig.LLMModel)
+	for _, m := range aiConfig.LLMFallbackModels {
+		add(m)
+	}
+	return chain
+}
+
+// geminiPostWithFallback POSTs body to the Gemini endpoint built by urlForModel,
+// trying models[startIdx:] in priority order. It advances to the next model on a
+// rate-limit (429) or server-unavailable (5xx) response (or a transport error),
+// since each model has its own quota. Other responses (2xx, or hard 4xx like a
+// bad request) are returned to the caller as-is. Returns the live response, the
+// index of the model that produced it, or an error if every model was exhausted.
+func geminiPostWithFallback(ctx context.Context, httpClient *http.Client,
+	urlForModel func(model string) string, body []byte, startIdx int) (*http.Response, int, error) {
+
+	models := geminiModelChain()
+	if len(models) == 0 {
+		return nil, 0, fmt.Errorf("no LLM models configured")
+	}
+	if startIdx < 0 {
+		startIdx = 0
+	}
+	if startIdx >= len(models) {
+		startIdx = len(models) - 1
+	}
+
+	lastStatus := 0
+	lastBody := ""
+	for idx := startIdx; idx < len(models); idx++ {
+		req, err := http.NewRequestWithContext(ctx, "POST", urlForModel(models[idx]), bytes.NewReader(body))
+		if err != nil {
+			return nil, idx, err
+		}
+		req.Header.Set("Content-Type", "application/json")
+
+		resp, err := httpClient.Do(req)
+		if err != nil {
+			lastStatus, lastBody = 0, err.Error()
+			logger.Warningf(ctx, "Gemini request to %q failed: %v", models[idx], err)
+			continue // transport error — try next model
+		}
+
+		if resp.StatusCode == http.StatusTooManyRequests || resp.StatusCode >= 500 {
+			b, _ := io.ReadAll(resp.Body)
+			resp.Body.Close()
+			lastStatus, lastBody = resp.StatusCode, string(b)
+			if idx+1 < len(models) {
+				logger.Warningf(ctx, "Gemini model %q unavailable (status %d), falling back to %q",
+					models[idx], resp.StatusCode, models[idx+1])
+			} else {
+				logger.Errorf(ctx, "Gemini model %q unavailable (status %d) and no fallback left",
+					models[idx], resp.StatusCode)
+			}
+			continue // rate-limited / overloaded — try next model
+		}
+
+		if idx > startIdx {
+			logger.Infof(ctx, "Gemini using fallback model %q", models[idx])
+		}
+		return resp, idx, nil
+	}
+	return nil, len(models) - 1, fmt.Errorf("all Gemini models exhausted (last status %d): %s", lastStatus, lastBody)
 }
 
 func buildGeminiRequest(systemPrompt string, contextMessages []map[string]interface{}) map[string]interface{} {
@@ -234,15 +311,8 @@ func callLLMGemini(ctx context.Context, client *AIClient) string {
 		return ""
 	}
 
-	req, err := http.NewRequestWithContext(ctx, "POST", geminiGenerateURL(), bytes.NewReader(bodyBytes))
-	if err != nil {
-		logger.Errorf(ctx, "Failed to create Gemini request: %v", err)
-		return ""
-	}
-	req.Header.Set("Content-Type", "application/json")
-
 	httpClient := &http.Client{Timeout: 60 * time.Second}
-	resp, err := httpClient.Do(req)
+	resp, _, err := geminiPostWithFallback(ctx, httpClient, geminiGenerateURL, bodyBytes, 0)
 	if err != nil {
 		logger.Errorf(ctx, "Gemini request failed: %v", err)
 		return ""
@@ -288,6 +358,7 @@ func callLLMGeminiWithTools(ctx context.Context, client *AIClient) string {
 
 	contents, _ := requestBody["contents"].([]map[string]interface{})
 
+	modelIdx := 0 // persists across tool iterations: once we fall back, stay there
 	for iteration := 0; iteration < 5; iteration++ {
 		requestBody["contents"] = contents
 		if tools != nil {
@@ -300,18 +371,12 @@ func callLLMGeminiWithTools(ctx context.Context, client *AIClient) string {
 			return ""
 		}
 
-		req, err := http.NewRequestWithContext(ctx, "POST", geminiGenerateURL(), bytes.NewReader(bodyBytes))
-		if err != nil {
-			logger.Errorf(ctx, "Failed to create Gemini request: %v", err)
-			return ""
-		}
-		req.Header.Set("Content-Type", "application/json")
-
-		resp, err := httpClient.Do(req)
+		resp, usedIdx, err := geminiPostWithFallback(ctx, httpClient, geminiGenerateURL, bodyBytes, modelIdx)
 		if err != nil {
 			logger.Errorf(ctx, "Gemini request failed: %v", err)
 			return ""
 		}
+		modelIdx = usedIdx
 		responseBytes, err := io.ReadAll(resp.Body)
 		resp.Body.Close()
 		if err != nil {
@@ -416,6 +481,7 @@ func streamLLMSentencesGemini(ctx context.Context, client *AIClient) string {
 		pipeline.submit(sentence)
 	}
 
+	modelIdx := 0 // persists across tool iterations: once we fall back, stay there
 	for iteration := 0; iteration < 5; iteration++ {
 		if ctx.Err() != nil {
 			break
@@ -432,21 +498,18 @@ func streamLLMSentencesGemini(ctx context.Context, client *AIClient) string {
 			break
 		}
 
-		req, err := http.NewRequestWithContext(ctx, "POST", geminiStreamURL(), bytes.NewReader(bodyBytes))
-		if err != nil {
-			logger.Errorf(ctx, "Failed to create Gemini request: %v", err)
-			break
-		}
-		req.Header.Set("Content-Type", "application/json")
-
 		iterStart := time.Now()
 		logger.Debugf(ctx, "Gemini stream iter=%d sending request", iteration)
 
-		resp, err := httpClient.Do(req)
+		// Send with model fallback: on rate-limit (429) / unavailable (5xx),
+		// geminiPostWithFallback advances to the next model in the priority chain.
+		resp, usedIdx, err := geminiPostWithFallback(ctx, httpClient,
+			geminiStreamURL, bodyBytes, modelIdx)
 		if err != nil {
 			logger.Errorf(ctx, "Gemini streaming request failed: %v", err)
 			break
 		}
+		modelIdx = usedIdx
 
 		if resp.StatusCode != http.StatusOK {
 			body, _ := io.ReadAll(resp.Body)

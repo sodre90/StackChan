@@ -34,8 +34,15 @@ type Config struct {
 	// ASR (Speech-to-Text) model name (e.g., "whisper-large-v3" for Ollama)
 	ASRModel string `yaml:"asr_model" json:"asr_model"`
 
-	// LLM model name (e.g., "qwen2.5", "llama3", "gpt-4o-mini")
+	// LLM model name (e.g., "qwen2.5", "llama3", "gpt-4o-mini"). For the gemini
+	// provider this is the primary/highest-priority model.
 	LLMModel string `yaml:"llm_model" json:"llm_model"`
+
+	// LLMFallbackModels (gemini provider) are tried in order, after LLMModel, when
+	// a request is rate-limited (HTTP 429) or the model is unavailable (5xx). Each
+	// model has its own quota, so falling back keeps the assistant responding when
+	// the primary model's quota is exhausted.
+	LLMFallbackModels []string `yaml:"llm_fallback_models" json:"llm_fallback_models"`
 
 	// TTS (Text-to-Speech) model name (e.g., "tts-1", "tts-1-hd")
 	TTSModel string `yaml:"tts_model" json:"tts_model"`
