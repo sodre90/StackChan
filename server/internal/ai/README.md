@@ -79,12 +79,14 @@ Edit `server/manifest/config/config.yaml`:
 
 ```yaml
 ai:
-  api_base_url: "http://localhost:11434/v1"  # Ollama API
-  api_key: ""                                 # Ollama doesn't require a key
-  asr_model: "whisper-large-v3"              # ASR model name
-  llm_model: "qwen2.5"                       # LLM model name
-  tts_model: "tts-1"                         # TTS model name (if supported)
-  tts_voice: "alloy"                         # TTS voice name
+  llm_provider: "gemini"                     # "gemini" or "openai"
+  api_key: ""                                # Gemini key — put in additional_config.yaml
+  llm_model: "gemini-3.5-flash"             # primary LLM model
+  llm_fallback_models: ["gemini-3.1-flash-lite"]  # tried on 429/5xx (gemini only)
+  asr_model: "whisper"                       # ASR model name
+  asr_language: "en"                         # ISO 639-1 hint, or "auto"
+  tts_model: "edge"                          # TTS engine (edge-tts)
+  tts_voice: "en-US-AvaNeural"               # any edge-tts voice
   tts_response_format: "opus"                # Opus for ESP32 playback
   system_prompt: "You are StackChan, a cute AI desktop robot..."
   enable_asr: true                           # Enable speech-to-text
@@ -185,12 +187,14 @@ The module includes two VAD implementations:
 
 ```go
 type Config struct {
-    APIBaseURL          string  // OpenAI-compatible API URL
-    APIKey              string  // API key (empty for local)
-    ASRModel            string  // ASR model (e.g., "whisper-large-v3")
-    LLMModel            string  // LLM model (e.g., "qwen2.5")
-    TTSModel            string  // TTS model (e.g., "tts-1")
-    TTSVoice            string  // TTS voice (e.g., "alloy")
+    LLMProvider         string  // "openai" or "gemini"
+    APIBaseURL          string  // OpenAI-compatible API URL (ignored for gemini)
+    APIKey              string  // API key (empty for local; Gemini key for gemini)
+    ASRModel            string  // ASR model (e.g., "whisper")
+    LLMModel            string  // LLM model (e.g., "gemini-3.5-flash")
+    LLMFallbackModels   []string // gemini: models tried on 429/5xx
+    TTSModel            string  // TTS model (e.g., "edge")
+    TTSVoice            string  // TTS voice (e.g., "en-US-AvaNeural")
     TTSResponseFormat   string  // TTS output format (mp3, opus, aac, flac, wav, pcm)
     SystemPrompt        string  // LLM system prompt
     EnableASR           bool    // Enable speech-to-text

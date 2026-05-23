@@ -74,7 +74,9 @@ python3 whisper_server.py --model small --port 13000 > /tmp/whisper.log 2>&1 &
 python3 tts_server.py --port 14000
 ```
 
-The default voice is `hu-HU-NoemiNeural` (Hungarian). To use a different language/voice:
+`tts_server.py`'s built-in default voice is `hu-HU-NoemiNeural`, but StackChan sends
+`tts_voice` with every request and overrides it — the repo's `config.yaml` ships
+`en-US-AvaNeural` (English). To change the standalone server default:
 ```bash
 python3 tts_server.py --port 14000 --voice en-US-AvaNeural
 ```
@@ -97,6 +99,11 @@ Pull a model if you haven't already:
 ollama pull qwen2.5:7b          # fast, good quality
 ollama pull llama3.2:3b         # smaller / faster
 ```
+
+> **Prefer a cloud LLM?** Skip Ollama and use Google Gemini: set `llm_provider: "gemini"`
+> and `llm_model: "gemini-3.5-flash"` in `config.yaml`, and put your `api_key` (from
+> [Google AI Studio](https://aistudio.google.com/apikey)) in `additional_config.yaml`.
+> The `api_base_url`/Ollama steps then don't apply.
 
 ---
 

@@ -1,8 +1,10 @@
 # StackChan Server Setup (Podman)
 
-End-to-end guide for running the StackChan AI server stack on a Linux box using `podman-compose`. The stack is fully self-contained — three containers handle the device WebSocket, speech-to-text (Whisper), and text-to-speech (Piper). No host-side Go, Python, or model installs are required.
+End-to-end guide for running the StackChan AI server stack on a Linux box using `podman-compose`. The stack is fully self-contained — three containers handle the device WebSocket, speech-to-text (Whisper), and text-to-speech (edge-tts). No host-side Go, Python, or model installs are required.
 
-The defaults are tuned for **Hungarian** voice interaction with Google's **Gemini** API as the LLM. Both can be swapped — see [Customizing the stack](#customizing-the-stack).
+The repo defaults to **English** voice interaction with Google's **Gemini** API as the LLM (with automatic fallback through `llm_fallback_models` on rate-limits). Personal overrides — including switching the language to Hungarian — go in `additional_config.yaml`. Both can be swapped — see [Customizing the stack](#customizing-the-stack).
+
+> Note: the bundled Whisper image (`whisper/Dockerfile.cpu`) ships a **Hungarian-tuned** base model. For accurate English (or another language), swap the model — see [Different language / Whisper model](#different-language--whisper-model).
 
 ---
 
@@ -20,7 +22,7 @@ The defaults are tuned for **Hungarian** voice interaction with Google's **Gemin
 │  │              │  │              │             │
 │  │              │  ┌──────────────┐             │
 │  │              │──│ tts :14000   │             │
-│  │              │  │ Piper        │             │
+│  │              │  │ edge-tts     │             │
 │  └──────┬───────┘  └──────────────┘             │
 └─────────┼───────────────────────────────────────┘
           │ WebSocket /xiaozhi/ws
@@ -40,7 +42,7 @@ On the server:
 | `podman-compose`    | 1.0+           | `pip install podman-compose` or distro package           |
 | `git`               | any            | `dnf install git` / `apt install git`                    |
 
-Disk: ~3 GB for images + first-run model downloads (~1 GB for Whisper, ~100 MB for the Piper voice).
+Disk: ~3 GB for images + first-run model downloads (~1 GB for the Whisper model). edge-tts streams from Microsoft's online service, so it needs outbound internet but no local voice model.
 
 Ports `12800`, `13000`, `14000` must be open inbound on the LAN.
 
@@ -66,19 +68,22 @@ All commands below are run from `StackChan/server/`.
 The repo ships with a working `config.yaml`. The fields most people want to tweak:
 
 ```yaml
-# LLM provider — "gemini" or "openai-compatible"
+# LLM provider — "gemini" or "openai"
 llm_provider: "gemini"
-api_base_url: "https://generativelanguage.googleapis.com/v1beta"
-llm_model:    "gemini-3.1-flash-lite"
+llm_model:    "gemini-3.5-flash"
+# Tried in order when the primary is rate-limited (429) or unavailable (5xx).
+# The gemini provider calls Google directly, so api_base_url is not used here.
+llm_fallback_models:
+  - "gemini-3.1-flash-lite"
 
-# ASR (faster-whisper, Hungarian-tuned base model by default)
+# ASR (faster-whisper). Bundled image is Hungarian-tuned; see Customizing to swap.
 asr_base_url: "http://whisper:13000/v1"
 asr_model:    "whisper"
-asr_language: "hu"          # "auto" disables the language hint
+asr_language: "en"          # "auto" disables the language hint; "hu" for Hungarian
 
-# TTS (Piper)
+# TTS (edge-tts) — the chosen voice selects the spoken language.
 tts_base_url:        "http://tts:14000/v1"
-tts_voice:           "hu_HU-anna-medium"
+tts_voice:           "en-US-AvaNeural"
 tts_response_format: "opus"
 
 # System prompt fed to the LLM
@@ -99,6 +104,8 @@ brave_search_api_key: "BSA...optional, enables real web search..."
 ha_token: "eyJ...optional, long-lived Home Assistant token..."
 ```
 
+You can also override **non-secret** keys here to avoid editing the tracked `config.yaml`. For example, to run in Hungarian, add `asr_language: "hu"`, `tts_voice: "hu-HU-NoemiNeural"` (or the multilingual `en-US-AvaMultilingualNeural`), and a Hungarian `system_prompt`.
+
 Both files are bind-mounted read-only into the `stackchan` container at `/app/config.yaml` and `/app/additional_config.yaml`.
 
 ---
@@ -111,7 +118,7 @@ podman-compose -f podman-compose.yml up -d --build
 
 > **Important:** always pass `-f podman-compose.yml`. If you omit it, `podman-compose` picks up `docker-compose.yml` instead, which targets the CUDA build of Whisper and will fail on a CPU-only host.
 
-First build takes ~5–10 minutes (pulls Python base image, installs faster-whisper, downloads the Piper voice). Subsequent builds use the layer cache and finish in seconds.
+First build takes ~5–10 minutes (pulls Python base image, installs faster-whisper and edge-tts). Subsequent builds use the layer cache and finish in seconds.
 
 On first start, the Whisper container downloads the pre-quantized model (`sarpba/whisper-base-hungarian_v1`, `quants/int8_bfloat16` subfolder) into the `whisper-models` named volume — that takes another ~30 s.
 
@@ -143,10 +150,10 @@ curl -s -X POST http://localhost:13000/v1/audio/transcriptions \
      -F 'file=@whisper/test-voice.mp3' -F 'language=hu' -F 'model=whisper'
 # → {"text":"Szia, Laci, várod már a nyaralást?", ...}
 
-# Piper TTS — synth a short clip
+# edge-tts — synth a short clip
 curl -s -X POST http://localhost:14000/v1/audio/speech \
      -H 'Content-Type: application/json' \
-     -d '{"model":"piper","input":"Sziasztok!","voice":"hu_HU-anna-medium","response_format":"opus"}' \
+     -d '{"model":"edge","input":"Hello there!","voice":"en-US-AvaNeural","response_format":"opus"}' \
      -o /tmp/test.ogg
 ```
 
@@ -213,9 +220,11 @@ If the model ships a pre-quantized CTranslate2 build in a HuggingFace subfolder,
 
 Also update `asr_language` in `config.yaml`. Set `asr_initial_prompt: ""` unless you're on a large model — small Whisper variants collapse to `.` outputs when given a long priming prompt.
 
-### Different TTS voice
+### Different TTS voice / language
 
-Piper voices live at <https://huggingface.co/rhasspy/piper-voices>. Update the two `curl` lines in `server/piper/Dockerfile` to download a different `.onnx` and `.onnx.json`, change the `--voice` flag in the `CMD`, and rebuild the `tts` container. Then point `tts_voice` in `config.yaml` at the new voice file name.
+edge-tts is voice-driven and needs no rebuild: set `tts_voice` in `config.yaml` (or `additional_config.yaml`) to any [edge-tts voice](https://github.com/rany2/edge-tts) and restart `stackchan`. Examples: `en-US-AvaNeural` (English), `hu-HU-NoemiNeural` (Hungarian), or a multilingual voice like `en-US-AvaMultilingualNeural` that auto-switches by text.
+
+To use local **Piper** TTS instead, point the `tts` service at `piper/Dockerfile` in `podman-compose.yml`, set a Piper voice in `server/piper/Dockerfile`, rebuild the `tts` container, and use that voice file name in `tts_voice`.
 
 ---
 
@@ -251,6 +260,8 @@ server/
 │   ├── Dockerfile.cpu      ← CPU Whisper image (used by podman-compose)
 │   └── Dockerfile          ← CUDA Whisper image
 ├── whisper_server.py       ← faster-whisper HTTP wrapper
-├── piper/Dockerfile        ← Piper TTS image
+├── tts/Dockerfile          ← edge-tts image (used by podman-compose)
+├── tts_server.py           ← edge-tts HTTP wrapper
+├── piper/Dockerfile        ← Piper TTS image (optional alternative)
 └── piper_server.py         ← Piper HTTP wrapper
 ```

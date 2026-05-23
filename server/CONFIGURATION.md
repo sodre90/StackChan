@@ -33,7 +33,8 @@ stream_llm: true
 | `llm_provider` | string | `"openai"` | LLM provider: `"openai"` (OpenAI-compatible APIs) or `"gemini"` (Google Gemini API). |
 | `api_base_url` | string | — | OpenAI-compatible base URL for the LLM. Ignored when `llm_provider` is `"gemini"`. Use `host.docker.internal` when running via Docker Compose. |
 | `api_key` | string | `""` | API key. For OpenAI-compatible: leave empty for local models. For Gemini: your Google AI Studio API key (required). Best placed in `additional_config.yaml`. |
-| `llm_model` | string | — | Model name. For OpenAI-compatible: as it appears in the LLM server (e.g. `qwen2.5:7b`). For Gemini: model ID (e.g. `gemini-2.0-flash`, `gemini-2.5-flash`). |
+| `llm_model` | string | — | Model name. For OpenAI-compatible: as it appears in the LLM server (e.g. `qwen2.5:7b`). For Gemini: model ID (e.g. `gemini-3.5-flash`, `gemini-3.1-flash-lite`). |
+| `llm_fallback_models` | list | `[]` | (gemini only) Models tried in order after `llm_model` when the primary is rate-limited (HTTP 429) or unavailable (5xx). Each model has its own quota, so this keeps the assistant responding when one runs out. A wrong model ID returns 404 and is **not** retried. |
 | `stream_llm` | bool | `true` | Stream LLM tokens for faster first-sentence TTS. Disable if your LLM backend does not support streaming. |
 | `context_messages` | int | `10` | Number of recent conversation turns to keep in the LLM context window. Higher = better memory, higher latency. |
 
@@ -55,7 +56,9 @@ stream_llm: true
 2. Set in `config.yaml`:
    ```yaml
    llm_provider: "gemini"
-   llm_model: "gemini-2.0-flash"
+   llm_model: "gemini-3.5-flash"
+   llm_fallback_models:        # optional: auto-fallback on rate-limits
+     - "gemini-3.1-flash-lite"
    ```
 3. Set in `additional_config.yaml`:
    ```yaml
@@ -260,14 +263,16 @@ enable_mcp_tools: true
 
 ```yaml
 llm_provider: "gemini"
-llm_model: "gemini-2.0-flash"
+llm_model: "gemini-3.5-flash"
+llm_fallback_models:
+  - "gemini-3.1-flash-lite"
 # api_key goes in additional_config.yaml
 
 asr_base_url: "http://host.docker.internal:13000/v1"
 tts_base_url: "http://tts:14000/v1"
 
 asr_model: "whisper"
-tts_model: "piper"
+tts_model: "edge"
 tts_voice: "en-US-AvaNeural"
 tts_response_format: "opus"
 

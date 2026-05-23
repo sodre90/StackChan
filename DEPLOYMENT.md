@@ -182,12 +182,15 @@ Edit `server/manifest/config/config.yaml`:
 
 ```yaml
 ai:
-  api_base_url: "http://localhost:11434/v1"
-  api_key: ""
-  asr_model: "whisper-large-v3"
-  llm_model: "qwen2.5"
-  tts_model: "tts-1"
-  tts_voice: "alloy"
+  llm_provider: "gemini"          # "gemini" or "openai"
+  api_key: ""                     # Gemini key — set in additional_config.yaml
+  llm_model: "gemini-3.5-flash"
+  llm_fallback_models:            # tried in order on rate-limit (429) / 5xx
+    - "gemini-3.1-flash-lite"
+  asr_model: "whisper"
+  asr_language: "en"              # or "auto", "hu", ...
+  tts_model: "edge"
+  tts_voice: "en-US-AvaNeural"
   tts_response_format: "opus"
   system_prompt: "You are StackChan, a cute AI desktop robot..."
   enable_asr: true

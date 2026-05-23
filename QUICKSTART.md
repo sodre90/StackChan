@@ -9,20 +9,31 @@ Get your StackChan robot talking in under 15 minutes.
 - A StackChan robot (M5Stack CoreS3 + servo body)
 - A computer on the same Wi-Fi network as the robot
 - [Docker Desktop](https://www.docker.com/products/docker-desktop/) installed
-- An LLM server — [Ollama](https://ollama.com) is the easiest option
+- An LLM — a free [Google Gemini](https://aistudio.google.com/apikey) API key (default),
+  **or** a local LLM server such as [Ollama](https://ollama.com)
 
 ---
 
-## Step 1 — Start a local LLM
+## Step 1 — Choose your LLM
+
+StackChan ships configured for **Google Gemini** (`llm_provider: "gemini"` in
+`server/config.yaml`) — the fastest way to get started, with no local model to run.
+
+**Option A — Gemini (default).** Grab a free API key from
+[Google AI Studio](https://aistudio.google.com/apikey). You'll paste it into
+`additional_config.yaml` in the next step. Nothing to install. If the primary model is
+rate-limited, the server automatically falls back through `llm_fallback_models`.
+
+**Option B — Local LLM (Ollama).** Run a model on your own machine instead:
 
 ```bash
-# Install Ollama from https://ollama.com, then:
 ollama pull qwen2.5:7b
 OLLAMA_HOST=0.0.0.0:8000 ollama serve
 ```
 
-Ollama must listen on port **8000** and be reachable from Docker containers.
-If you use a different LLM server, update `api_base_url` in `server/config.yaml`.
+Then in `server/config.yaml` set `llm_provider: "openai"`, point
+`api_base_url` at `http://host.docker.internal:8000/v1`, and set `llm_model` to the
+model you pulled. Ollama must listen on port **8000** and be reachable from the containers.
 
 ---
 
@@ -31,6 +42,18 @@ If you use a different LLM server, update `api_base_url` in `server/config.yaml`
 ```bash
 git clone --recurse-submodules https://github.com/sodre90/StackChan
 cd StackChan/server
+```
+
+If you're using Gemini (Option A), put your API key in `additional_config.yaml` — a
+gitignored file that's merged on top of `config.yaml`, so secrets never get committed:
+
+```bash
+echo 'api_key: "YOUR_GEMINI_API_KEY"' >> additional_config.yaml
+```
+
+Then build and start the containers:
+
+```bash
 docker compose up
 ```
 
@@ -39,10 +62,10 @@ This builds and starts three containers:
 | Container | Port | Role |
 |-----------|------|------|
 | `stackchan` | 12800 | Main server — WebSocket, OTA, AI pipeline |
-| `whisper` | 13000 | Speech-to-text (downloads ~3 GB model on first run) |
-| `tts` | 14000 | Text-to-speech (edge-tts, Microsoft neural voices) |
+| `whisper` | 13000 | Speech-to-text (downloads its model on first run) |
+| `tts` | 14000 | Text-to-speech |
 
-First startup takes a few minutes while the Whisper large-v3 model downloads.
+First startup takes a few minutes while the Whisper model downloads.
 Watch progress with `docker compose logs -f whisper`.
 
 Verify everything is up:
@@ -118,7 +141,8 @@ The AI pipeline is configured in `server/config.yaml`. Open it to change:
 
 - **Language** — `asr_language` (Whisper), `tts_voice` (edge-tts voice), and the response
   language in `system_prompt` (default: English; override in `additional_config.yaml`)
-- **LLM model** — `llm_model` (must match what you pulled in Ollama)
+- **LLM** — `llm_provider` (`gemini` or `openai`) and `llm_model`; for Gemini, set
+  `llm_fallback_models` for automatic fallback on rate-limits
 - **Personality** — `system_prompt`
 - **Voice** — `tts_voice` (any [edge-tts voice](https://github.com/rany2/edge-tts))
 
