@@ -4,6 +4,75 @@
 
 **Pre-order your StackChan**: https://m5stack.com/stackchan
 
+---
+
+## About this fork
+
+This is a fork of [m5stack/StackChan](https://github.com/m5stack/StackChan) that adds a
+**fully self-hosted AI backend**. Instead of relying on a cloud assistant, you run the entire
+voice pipeline — speech-to-text, the language model, and text-to-speech — on your own machine,
+and the device talks to it over WebSocket. Everything below the product description is new in
+this fork.
+
+### What this fork adds
+
+- **Self-hosted voice pipeline** — `ASR → LLM → TTS` over WebSocket, all running locally. The
+  device's OTA endpoint points at your own server.
+- **Pluggable LLM providers** — OpenAI-compatible (Ollama, llama.cpp, vLLM, OpenAI) **or** the
+  Google Gemini API, selectable via `llm_provider`.
+- **Gemini priority fallback** — on a rate-limit (HTTP 429) or unavailability (5xx), the request
+  automatically retries the next model in a configured chain (`llm_fallback_models`), so the
+  assistant keeps responding when one model's quota is exhausted.
+- **Local ASR** — Whisper via `faster-whisper`, or `mlx-whisper` for Apple-Silicon GPU; a
+  `wav2vec2` server is also included as an alternative.
+- **Local TTS** — `edge-tts` (Microsoft neural voices) by default, with a Piper alternative.
+  Output is 16 kHz mono Opus, matched to the firmware's audio pipeline. Defaults to Hungarian.
+- **MCP tools** — web search, weather, crypto/stock prices, and robot control: head servos, RGB
+  LEDs, facial expressions, dances, and reminders.
+- **Home Assistant integration** — turn devices on/off, run scripts, and query entity state.
+- **Google Calendar integration** (OAuth2) — list upcoming events and get proactive spoken
+  reminders at configurable milestones before an event.
+- **Containerized deploy** — Docker Compose **and** Podman Compose stacks (`stackchan` + `whisper`
+  + `tts`).
+- **Firmware tweaks** — automatic reconnect with exponential backoff after a server restart.
+- **Text test endpoints** — trigger a reply over HTTP without speaking: `/xiaozhi/test/chat`,
+  `/xiaozhi/test/speak`, and `/xiaozhi/test/devices`.
+
+### Architecture
+
+```
+  ┌──────────────┐   WebSocket    ┌────────────────────────────────────────┐
+  │  StackChan    │ ◀────────────▶ │  Go server (:12800)                     │
+  │  (CoreS3)     │   Opus audio   │  OTA · /xiaozhi/ws · AI pipeline · MCP   │
+  └──────────────┘                └───────┬───────────────┬─────────────────┘
+                                          │               │
+                              ┌───────────▼──┐   ┌────────▼─────────┐   ┌──────────────┐
+                              │ Whisper ASR  │   │  LLM             │   │  edge-tts    │
+                              │  (:13000)    │   │  Gemini / local  │   │  (:14000)    │
+                              └──────────────┘   └──────────────────┘   └──────────────┘
+```
+
+### Get started
+
+| Guide | What it covers |
+|-------|----------------|
+| [QUICKSTART.md](QUICKSTART.md) | Robot talking in ~15 min (Docker + Ollama) |
+| [SERVER_SETUP.md](SERVER_SETUP.md) | Full server setup with Podman |
+| [DEPLOYMENT.md](DEPLOYMENT.md) | End-to-end deployment (server + firmware + OTA) |
+| [server/DOCKER_SETUP.md](server/DOCKER_SETUP.md) | Docker Compose deployment details |
+| [server/LOCAL_AI_SETUP.md](server/LOCAL_AI_SETUP.md) | Running the services without containers |
+| [server/CONFIGURATION.md](server/CONFIGURATION.md) | Every `config.yaml` option |
+| [server/internal/ai/README.md](server/internal/ai/README.md) | AI protocol handler internals |
+
+Secrets (API keys, OAuth tokens) go in `server/additional_config.yaml` (gitignored), which is
+merged on top of `config.yaml` at startup.
+
+---
+
+> The sections below describe the original StackChan product and hardware.
+
+
+
 > The software development is still in progress. Final features and documentation may change. Thank you for your understanding. 
 
 <img src="https://cdn.shopify.com/s/files/1/0056/7689/2250/files/5a589623895f65487717894d9240f6b8.png" width="60%">
