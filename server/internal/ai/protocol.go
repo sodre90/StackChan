@@ -15,7 +15,6 @@ import (
 	"io"
 	"math"
 	"mime/multipart"
-	"net"
 	"net/http"
 	"strings"
 	"sync"
@@ -218,14 +217,6 @@ func Handler(r *ghttp.Request) {
 	if err != nil {
 		logger.Errorf(ctx, "WebSocket upgrade failed: %v", err)
 		return
-	}
-	// Disable Nagle: each Opus frame is ~180 bytes, and batching them adds
-	// up to ~200ms of latency under WiFi congestion — exactly when the device
-	// playback buffer is most at risk of underrunning. Send frames immediately.
-	if tcp, ok := ws.UnderlyingConn().(*net.TCPConn); ok {
-		if err := tcp.SetNoDelay(true); err != nil {
-			logger.Warningf(ctx, "TCP_NODELAY failed: %v", err)
-		}
 	}
 
 	client := &AIClient{
