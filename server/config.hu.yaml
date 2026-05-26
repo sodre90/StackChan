@@ -70,7 +70,7 @@ asr_language: "hu"
 asr_initial_prompt: ""
 
 # VAD (Voice Activity Detection) settings
-vad_silence_timeout_ms: 800
+vad_silence_timeout_ms: 2000
 vad_ticker_interval_ms: 100
 vad_rms_threshold: 0.01
 
