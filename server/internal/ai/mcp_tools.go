@@ -53,6 +53,7 @@ type MCPManager struct {
 	haURL         string
 	haToken       string
 	gcal          *googleCalendar
+	kifli         *kifliClient
 }
 
 // DeviceState tracks the state of an ESP32 device
@@ -241,6 +242,10 @@ func NewMCPManager(cfg Config) *MCPManager {
 
 	if cfg.GoogleOAuthClientID != "" && cfg.GoogleOAuthClientSecret != "" && cfg.GoogleOAuthRefreshToken != "" {
 		m.registerGoogleCalendarTools(cfg)
+	}
+
+	if cfg.KifliEmail != "" && cfg.KifliPassword != "" {
+		m.registerKifliTools(cfg)
 	}
 
 	return m

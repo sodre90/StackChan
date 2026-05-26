@@ -120,6 +120,13 @@ type Config struct {
 	// Used as a fallback when GoogleCalendarReminderMinutes is empty.
 	GoogleCalendarAnnounceMinutes int `yaml:"google_calendar_announce_minutes" json:"google_calendar_announce_minutes"`
 
+	// Kifli.hu account email. When set together with KifliPassword, kifli MCP tools
+	// (cart, orders, product search, etc.) are registered against https://mcp.kifli.hu/mcp.
+	KifliEmail string `yaml:"kifli_email" json:"kifli_email"`
+
+	// Kifli.hu account password. Used as the rhl-pass header on every MCP request.
+	KifliPassword string `yaml:"kifli_password" json:"kifli_password"`
+
 	// Multiple reminder milestones in minutes before an event start, e.g. [30, 10, 1].
 	// Each milestone is announced once as the countdown crosses it. Overrides
 	// GoogleCalendarAnnounceMinutes when non-empty.
