@@ -15,6 +15,7 @@ import (
 	"io"
 	"math"
 	"mime/multipart"
+	"net"
 	"net/http"
 	"strings"
 	"sync"
@@ -217,6 +218,14 @@ func Handler(r *ghttp.Request) {
 	if err != nil {
 		logger.Errorf(ctx, "WebSocket upgrade failed: %v", err)
 		return
+	}
+	// Disable Nagle: each Opus frame is ~180 bytes, and batching them adds
+	// up to ~200ms of latency under WiFi congestion — exactly when the device
+	// playback buffer is most at risk of underrunning. Send frames immediately.
+	if tcp, ok := ws.UnderlyingConn().(*net.TCPConn); ok {
+		if err := tcp.SetNoDelay(true); err != nil {
+			logger.Warningf(ctx, "TCP_NODELAY failed: %v", err)
+		}
 	}
 
 	client := &AIClient{
@@ -1697,7 +1706,16 @@ func (c *AIClient) writeWS(messageType int, data []byte) error {
 	if conn == nil {
 		return fmt.Errorf("websocket connection is nil")
 	}
-	return conn.WriteMessage(messageType, data)
+	start := time.Now()
+	err := conn.WriteMessage(messageType, data)
+	// Surface TCP/WiFi stalls: a slow write means the kernel send buffer is
+	// full and the device hasn't ACKed — the device-side playout buffer is
+	// likely draining toward an underrun. 200ms is well above normal LAN
+	// jitter but below the 900ms lead, so it flags risk before audible gaps.
+	if elapsed := time.Since(start); elapsed > 200*time.Millisecond {
+		logger.Warningf(c.ctx, "slow ws write: %dms (type=%d bytes=%d)", elapsed.Milliseconds(), messageType, len(data))
+	}
+	return err
 }
 
 // sendJSON sends a JSON message to the device
