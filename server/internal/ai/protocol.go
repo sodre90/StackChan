@@ -387,11 +387,10 @@ func handleListen(ctx context.Context, client *AIClient, envelope map[string]int
 		}
 
 	case "detect":
-		// Wake word detected - process the text directly
+		// Wake word detected — just log it. The actual user speech will arrive
+		// via "start" + audio stream, processed by the VAD pipeline.
 		client.mu.Unlock()
-		if text != "" {
-			go processLLMResponse(ctx, client, text)
-		}
+		logger.Info(ctx, "Wake word detected", "text", text)
 	}
 }
 
