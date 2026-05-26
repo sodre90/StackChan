@@ -82,7 +82,7 @@ asr_initial_prompt: ""
 #   Lower values = more sensitive (may trigger on quiet speech but also on noise).
 #   If you see 15-20s delays with "VAD filter removed ~19s of audio", raise this value.
 #   Typical range: 0.01–0.1. Start at 0.05 and adjust based on your environment.
-vad_silence_timeout_ms: 800
+vad_silence_timeout_ms: 2000
 vad_ticker_interval_ms: 100
 
 vad_rms_threshold: 0.01
