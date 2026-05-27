@@ -531,15 +531,9 @@ vadLoop:
 		} else {
 			logger.Debugf(ctx, "Speech too short (%d ticks), likely noise — skipping ASR", speechTicks)
 		}
-		client.mu.RLock()
-		lastReal := client.lastRealSpeechAt
-		client.mu.RUnlock()
-		if !lastReal.IsZero() && time.Since(lastReal) > idleListenTimeout {
-			logger.Info(ctx, "Idle timeout — no speech for 60s, going quiet")
-			return
-		}
-		sendTTS(ctx, client, "start", "")
-		sendTTS(ctx, client, "stop", "")
+		// Don't send empty TTS start/stop — in auto mode the device interprets
+		// TTS stop as "ready for next listen round", creating an infinite loop
+		// that prevents it from ever returning to Idle (and enabling wake word).
 		return
 	}
 
