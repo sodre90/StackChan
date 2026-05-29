@@ -249,7 +249,13 @@ func Handler(r *ghttp.Request) {
 	logger.Info(ctx, "AI client connected", "mac", mac)
 	defer func() {
 		clientsMu.Lock()
-		delete(activeClients, mac)
+		// Only remove the entry if it still points to THIS client. A device that
+		// reconnects registers a new client under the same mac before this old
+		// connection's cleanup runs; deleting unconditionally would wipe the live
+		// new client and leave the device unregistered (sent_to_devices=0).
+		if activeClients[mac] == client {
+			delete(activeClients, mac)
+		}
 		clientsMu.Unlock()
 		mcpManager.MarkDeviceOffline(mac)
 		client.cancel()
