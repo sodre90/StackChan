@@ -1738,6 +1738,9 @@ func sendTTS(ctx context.Context, client *AIClient, state, text string) {
 	if text != "" {
 		msg["text"] = text
 	}
+	if state == "sentence_start" {
+		logger.Infof(ctx, "[dbg] sentence_start text=%q", text)
+	}
 	sendJSON(ctx, client, msg)
 }
 
