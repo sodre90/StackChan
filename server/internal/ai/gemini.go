@@ -22,6 +22,25 @@ func systemPromptWithDate(base string) string {
 	return "Today's date is " + dateStr + ".\n\n" + base
 }
 
+// newGeminiHTTPClient builds the HTTP client used for all Gemini calls. The
+// overall Timeout bounds the whole request (generous for streaming short
+// replies), while ResponseHeaderTimeout bounds only the wait for the response
+// headers. SSE responses ("alt=sse") return their 200 headers almost
+// immediately, so a healthy request always clears this in well under a second.
+// A stalled or overloaded primary model (we've seen gemini-3.5-flash hang the
+// full 60s "awaiting headers", or return 503 after ~17s) instead trips the
+// header timeout fast, so geminiPostWithFallback can fail over to the healthy
+// fallback model in seconds rather than after a full minute. This does NOT
+// truncate legitimate streaming — only the time-to-first-byte phase is bounded.
+func newGeminiHTTPClient() *http.Client {
+	transport := http.DefaultTransport.(*http.Transport).Clone()
+	transport.ResponseHeaderTimeout = 8 * time.Second
+	return &http.Client{
+		Timeout:   60 * time.Second,
+		Transport: transport,
+	}
+}
+
 func geminiGenerateURL(model string) string {
 	base := geminiDefaultBaseURL
 	return fmt.Sprintf("%s/models/%s:generateContent?key=%s",
@@ -311,7 +330,7 @@ func callLLMGemini(ctx context.Context, client *AIClient) string {
 		return ""
 	}
 
-	httpClient := &http.Client{Timeout: 60 * time.Second}
+	httpClient := newGeminiHTTPClient()
 	resp, _, err := geminiPostWithFallback(ctx, httpClient, geminiGenerateURL, bodyBytes, 0)
 	if err != nil {
 		logger.Errorf(ctx, "Gemini request failed: %v", err)
@@ -354,7 +373,7 @@ func callLLMGeminiWithTools(ctx context.Context, client *AIClient) string {
 	requestBody := buildGeminiRequest(systemPrompt, contextMessages)
 
 	tools := geminiToolDeclarations()
-	httpClient := &http.Client{Timeout: 60 * time.Second}
+	httpClient := newGeminiHTTPClient()
 
 	contents, _ := requestBody["contents"].([]map[string]interface{})
 
@@ -458,7 +477,7 @@ func streamLLMSentencesGemini(ctx context.Context, client *AIClient) string {
 	contents, _ := requestBody["contents"].([]map[string]interface{})
 
 	var assembled strings.Builder
-	httpClient := &http.Client{Timeout: 60 * time.Second}
+	httpClient := newGeminiHTTPClient()
 
 	// TTS pipeline: render sentences across a worker pool concurrently with
 	// playback, preserving order, so audio for upcoming sentences is ready before
