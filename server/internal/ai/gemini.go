@@ -496,11 +496,10 @@ func streamLLMSentencesGemini(ctx context.Context, client *AIClient) string {
 		}
 		assembled.WriteString(sentence)
 		assembled.WriteByte(' ')
-		// Display the full answer so far (not just this sentence) so the device
-		// shows the complete reply as it streams, instead of only the last
-		// sentence. Audio still plays one sentence at a time via the pipeline.
-		sendTTS(ctx, client, "sentence_start", strings.TrimSpace(assembled.String()))
-		pipeline.submit(sentence)
+		// Hand the cumulative answer-so-far to the pipeline; it emits the
+		// sentence_start (the full text up to here) right before this sentence's
+		// audio, so the bubble grows in step with the voice rather than all at once.
+		pipeline.submit(sentence, strings.TrimSpace(assembled.String()))
 	}
 
 	modelIdx := 0 // persists across tool iterations: once we fall back, stay there

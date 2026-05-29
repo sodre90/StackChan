@@ -696,9 +696,10 @@ func processLLMResponse(ctx context.Context, client *AIClient, userText string) 
 // ttsJob is one sentence rendered to Opus by the TTS worker pool. done is closed
 // once audio is populated (or rendering was skipped/cancelled).
 type ttsJob struct {
-	sentence string
-	audio    []byte
-	done     chan struct{}
+	sentence    string
+	displayText string // cumulative answer text to show when this sentence plays
+	audio       []byte
+	done        chan struct{}
 }
 
 // ttsWorkerCount is how many sentences are rendered concurrently. Cloud edge-tts
@@ -747,6 +748,14 @@ func newTTSPipeline(ctx context.Context, client *AIClient) *ttsPipeline {
 			if ctx.Err() != nil {
 				continue // drain so workers can exit
 			}
+			// Send the cumulative display text right before this sentence's audio,
+			// not eagerly when the LLM streamed it. Audio is paced to ~realtime, so
+			// interleaving the text here keeps the device's bubble in step with the
+			// voice instead of showing the whole answer up front. The firmware ties
+			// this text to the sentence's first audio packet for precise sync.
+			if job.displayText != "" {
+				sendTTS(ctx, client, "sentence_start", job.displayText)
+			}
 			if len(job.audio) > 0 {
 				sendAudioChunks(ctx, client, job.audio)
 			}
@@ -759,8 +768,8 @@ func newTTSPipeline(ctx context.Context, client *AIClient) *ttsPipeline {
 // submit queues a sentence; submission order is playback order. Rendering happens
 // in the background, so this returns quickly, applying backpressure only if the
 // queues fill.
-func (p *ttsPipeline) submit(sentence string) {
-	job := &ttsJob{sentence: sentence, done: make(chan struct{})}
+func (p *ttsPipeline) submit(sentence, displayText string) {
+	job := &ttsJob{sentence: sentence, displayText: displayText, done: make(chan struct{})}
 	p.orderCh <- job // reserve the playback slot first to preserve order
 	p.jobCh <- job   // hand to a worker
 }
@@ -837,11 +846,10 @@ func streamLLMSentences(ctx context.Context, client *AIClient) string {
 		}
 		assembled.WriteString(sentence)
 		assembled.WriteByte(' ')
-		// Display the full answer so far (not just this sentence) so the device
-		// shows the complete reply as it streams, instead of only the last
-		// sentence. Audio still plays one sentence at a time via the pipeline.
-		sendTTS(ctx, client, "sentence_start", strings.TrimSpace(assembled.String()))
-		pipeline.submit(sentence)
+		// Hand the cumulative answer-so-far to the pipeline; it emits the
+		// sentence_start (the full text up to here) right before this sentence's
+		// audio, so the bubble grows in step with the voice rather than all at once.
+		pipeline.submit(sentence, strings.TrimSpace(assembled.String()))
 	}
 
 	scanner := bufio.NewScanner(resp.Body)
