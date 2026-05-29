@@ -26,6 +26,13 @@ private:
     uint32_t _screensaver_timecount = 0;
     bool _startup_checked           = false;
 
+    // Auto-enter the AI agent (xiaozhi) shortly after boot unless the user
+    // touches the launcher first. Armed only when the device is configured.
+    bool _auto_agent_armed   = false;
+    bool _user_interacted    = false;
+    uint32_t _launcher_open_ms = 0;
+
     void create_launcher_view();
+    void auto_agent_update();
     void screensaver_update();
 };

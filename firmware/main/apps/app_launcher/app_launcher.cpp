@@ -47,6 +47,7 @@ void AppLauncher::onLauncherRunning()
         }
     } else {
         _view->update();
+        auto_agent_update();
         screensaver_update();
     }
 
@@ -73,8 +74,45 @@ void AppLauncher::create_launcher_view()
     _view->init(getAppProps());
     _view->onAppClicked = [&](int appID) {
         mclog::tagInfo(getAppInfo().name, "handle open app, app id: {}", appID);
+        _auto_agent_armed = false;  // explicit app choice cancels auto-enter
         openApp(appID);
     };
+
+    // Arm the auto-enter only on an already-configured device so a fresh
+    // device still goes through WiFi setup instead of jumping into xiaozhi.
+    _auto_agent_armed  = GetHAL().isAppConfiged();
+    _user_interacted   = false;
+    _launcher_open_ms  = GetHAL().millis();
+}
+
+void AppLauncher::auto_agent_update()
+{
+    // Show the launcher briefly after boot, then enter the AI agent (xiaozhi)
+    // unless the user touches the screen first. A single touch cancels it so
+    // the launcher stays usable for picking other apps / Setup.
+    const uint32_t AUTO_ENTER_MS    = 3000;  // launcher dwell before auto-enter
+    const uint32_t TOUCH_GRACE_MS   = 600;   // ignore the boot-time inactive baseline
+    const uint32_t TOUCH_ACTIVE_MS  = 300;   // inactive time below this == fresh touch
+
+    if (!_auto_agent_armed) {
+        return;
+    }
+
+    const uint32_t elapsed = GetHAL().millis() - _launcher_open_ms;
+
+    // After a short grace period, a low inactivity time means the user just
+    // touched the screen → cancel auto-enter and let them browse.
+    if (elapsed > TOUCH_GRACE_MS && lv_display_get_inactive_time(NULL) < TOUCH_ACTIVE_MS) {
+        _auto_agent_armed = false;
+        mclog::tagInfo(getAppInfo().name, "auto-enter cancelled by touch");
+        return;
+    }
+
+    if (elapsed >= AUTO_ENTER_MS) {
+        _auto_agent_armed = false;
+        mclog::tagInfo(getAppInfo().name, "auto-entering AI agent (xiaozhi)");
+        GetHAL().requestXiaozhiStart();
+    }
 }
 
 void AppLauncher::screensaver_update()
