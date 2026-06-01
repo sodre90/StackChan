@@ -24,7 +24,7 @@ static const int _bubble_max_height = 110; // ~4 lines of montserrat_16
 static const int _bubble_radius    = 18;
 static const Vector2i _container_size = Vector2i(320, _bubble_max_height + _bottom_margin);
 
-static const uint32_t _page_dwell_ms     = 3500; // time each page is held before flipping
+static const uint32_t _page_dwell_ms     = 4500; // time each page is held before flipping
 static const uint32_t _render_debounce_ms = 120;  // coalesce a burst of cumulative updates
 
 LV_IMAGE_DECLARE(default_bubble_arrow);
@@ -175,20 +175,29 @@ void DefaultSpeechBubble::renderPending()
 
     _bubble->setSize(_bubble_width, bubble_height);
 
-    // If the reply is taller than the (capped) bubble, the bottom is clipped.
-    // Page through it: step by whole lines so a line is never split across two
-    // pages, hold each page, then wrap. The visible window is bubble minus vpad.
+    // If the reply is taller than the (capped) bubble, scroll to show the
+    // START of the newest sentence (= where the previous text ended). The voice
+    // begins each sentence from its start, so the user reads along with it.
+    // If the current sentence itself overflows, page through it with a timer.
     const int visible_h = bubble_height - _text_vpad * 2;
     _scroll_max         = text_size.y - visible_h;
     if (_scroll_max > 0) {
-        const int line_h     = lv_font_get_line_height(_text->getTextFont());
-        int lines_per_page   = line_h > 0 ? visible_h / line_h : 1;
-        if (lines_per_page < 1) {
-            lines_per_page = 1;
+        // Scroll to where the new content begins (previous text height).
+        _page_pos = _prev_content_height > _scroll_max ? _scroll_max : _prev_content_height;
+        lv_obj_set_style_translate_y(_text->get(), -_page_pos, 0);
+
+        // If the new sentence extends below the visible window, page through it.
+        if (_scroll_max - _page_pos > 0) {
+            const int line_h   = lv_font_get_line_height(_text->getTextFont());
+            int lines_per_page = line_h > 0 ? visible_h / line_h : 1;
+            if (lines_per_page < 1) lines_per_page = 1;
+            _page_step  = lines_per_page * line_h;
+            _page_timer = lv_timer_create(pageTimerCb, _page_dwell_ms, this);
         }
-        _page_step  = lines_per_page * line_h;
-        _page_timer = lv_timer_create(pageTimerCb, _page_dwell_ms, this);
     }
+
+    // Remember this text's height so the next sentence scrolls to the right spot.
+    _prev_content_height = text_size.y;
 
     setVisible(true);
 }
@@ -200,6 +209,7 @@ void DefaultSpeechBubble::clearSpeech()
         _render_timer = nullptr;
     }
     _pending_text.clear();
+    _prev_content_height = 0;
     stopPaging();
     _text->setText("");
     setVisible(false);

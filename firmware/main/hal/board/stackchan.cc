@@ -18,10 +18,22 @@
 #include <esp_timer.h>
 #include "stackchan_camera.h"
 #include "hal_bridge.h"
+#include <stackchan/stackchan.h>
 
 #define TAG "M5Stack-StackChan-Board"
 
 #define XPOWERS_AXP2101_ICC_CHG_SET (0x62)
+
+// Turn the display off after this many seconds of idle. The mic + wake word stay
+// active during sleep, so "hi stackchan" (or a touch) wakes the screen back up.
+static const int DISPLAY_SLEEP_SECONDS = 60;
+
+// Head pitch (tenths of a degree; servo range 0..900 = 0..90deg, 0 = fully down,
+// 900 = fully up). On sleep the head droops down; on wake it perks up to ~45deg.
+static const int HEAD_PITCH_SLEEP = 0;    // head down
+static const int HEAD_PITCH_WAKE  = 450;  // ~45deg up (not all the way to the top)
+static const int HEAD_SPEED_SLEEP = 120;  // gentle droop
+static const int HEAD_SPEED_WAKE  = 400;  // perk up a bit livelier
 
 class Pmic : public Axp2101 {
 public:
@@ -212,6 +224,11 @@ private:
     esp_timer_handle_t touchpad_timer_;
     PowerSaveTimer* power_save_timer_;
 
+    esp_timer_handle_t display_sleep_timer_;
+    int idle_seconds_        = 0;      // seconds idle with the screen on
+    bool display_off_        = false;  // true while the screen is asleep (backlight off)
+    bool touch_wake_swallow_ = false;  // consume the touch that woke the screen
+
     void InitializePowerSaveTimer()
     {
         power_save_timer_ = new PowerSaveTimer(-1, 300, 600);
@@ -225,6 +242,62 @@ private:
         });
         power_save_timer_->OnShutdownRequest([this]() { pmic_->PowerOff(); });
         power_save_timer_->SetEnabled(true);
+    }
+
+    // Turn the display off after DISPLAY_SLEEP_SECONDS of idle. We can't reuse the
+    // shared PowerSaveTimer because it gates on Application::CanEnterSleepMode(), which
+    // stays false while the persistent server connection holds the audio channel open.
+    // The backlight doesn't care about the channel, so we run our own 1s timer keyed
+    // purely on device state + audio idleness. The mic / wake word stay live the whole
+    // time, so "hi stackchan" (state leaves Idle) or a touch wakes the screen; there is
+    // no auto power-off here, so it can always be woken by voice.
+    void InitializeDisplaySleepTimer()
+    {
+        esp_timer_create_args_t timer_args = {
+            .callback              = [](void* arg) { ((M5StackCoreS3Board*)arg)->DisplaySleepCheck(); },
+            .arg                   = this,
+            .dispatch_method       = ESP_TIMER_TASK,
+            .name                  = "display_sleep_timer",
+            .skip_unhandled_events = true,
+        };
+        ESP_ERROR_CHECK(esp_timer_create(&timer_args, &display_sleep_timer_));
+        ESP_ERROR_CHECK(esp_timer_start_periodic(display_sleep_timer_, 1000000));  // 1s
+    }
+
+    void WakeDisplay()
+    {
+        idle_seconds_ = 0;
+        if (display_off_) {
+            ESP_LOGI(TAG, "Display wake");
+            display_off_ = false;
+            GetDisplay()->SetPowerSaveMode(false);
+            GetBacklight()->RestoreBrightness();
+            // Perk the head up to ~45deg as it wakes.
+            GetStackChan().motion().movePitchWithSpeed(HEAD_PITCH_WAKE, HEAD_SPEED_WAKE);
+        }
+    }
+
+    void DisplaySleepCheck()
+    {
+        auto& app = Application::GetInstance();
+        // "Active" = a conversation or audio playback is happening. Deliberately ignore
+        // IsAudioChannelOpened() (it's held open for server-pushed announcements).
+        bool active = app.GetDeviceState() != kDeviceStateIdle || !app.GetAudioService().IsIdle();
+        if (active) {
+            WakeDisplay();  // also turns the screen back on (wake word / announcement)
+            return;
+        }
+        if (display_off_) {
+            return;  // already asleep — waiting for wake word or touch
+        }
+        if (++idle_seconds_ >= DISPLAY_SLEEP_SECONDS) {
+            ESP_LOGI(TAG, "Display sleep (idle %ds)", idle_seconds_);
+            display_off_ = true;
+            GetDisplay()->SetPowerSaveMode(true);
+            GetBacklight()->SetBrightness(0);  // backlight fully off (DLDO1 off)
+            // Droop the head down as it goes to sleep.
+            GetStackChan().motion().movePitchWithSpeed(HEAD_PITCH_SLEEP, HEAD_SPEED_SLEEP);
+        }
     }
 
     void InitializeI2c()
@@ -284,7 +357,23 @@ private:
     void PollTouchpad()
     {
         ft6336_->UpdateTouchPoint();
-        auto& touch_point = ft6336_->GetTouchPoint();
+        auto touch_point = ft6336_->GetTouchPoint();
+
+        if (touch_point.num > 0) {
+            idle_seconds_ = 0;  // touch activity keeps the screen awake
+            if (display_off_) {
+                WakeDisplay();              // a tap wakes the screen ...
+                touch_wake_swallow_ = true;  // ... and is consumed (no chat toggle)
+            }
+        } else {
+            touch_wake_swallow_ = false;  // finger lifted; subsequent touches are normal
+        }
+
+        // While swallowing the wake tap, report no touch so the HAL doesn't act on it.
+        if (touch_wake_swallow_) {
+            hal_bridge::set_touch_point(0, -1, -1);
+            return;
+        }
 
         // Update hal touch point
         hal_bridge::set_touch_point(touch_point.num, touch_point.x, touch_point.y);
@@ -412,6 +501,7 @@ public:
     M5StackCoreS3Board()
     {
         InitializePowerSaveTimer();
+        InitializeDisplaySleepTimer();
         InitializeI2c();
         InitializeAxp2101();
         InitializeAw9523();
@@ -460,6 +550,11 @@ public:
     {
         if (level != PowerSaveLevel::LOW_POWER) {
             power_save_timer_->WakeUp();
+            // NOTE: do NOT wake the display here. PERFORMANCE is also requested when
+            // the persistent connection silently re-opens the idle audio channel
+            // (no conversation), which would light the screen for nothing. The
+            // display wakes via DisplaySleepCheck when the device actually leaves
+            // Idle (wake word / announcement), within ~1s.
         }
         WifiBoard::SetPowerSaveLevel(level);
     }

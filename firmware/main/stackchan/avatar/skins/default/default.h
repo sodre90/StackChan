@@ -111,9 +111,10 @@ private:
     lv_timer_t* _render_timer = nullptr;
 
     lv_timer_t* _page_timer = nullptr;
-    int _page_pos           = 0;  // current vertical offset (px, >= 0)
-    int _page_step          = 0;  // whole-line page height (px)
-    int _scroll_max         = 0;  // max offset = content height - visible height
+    int _page_pos            = 0;  // current vertical offset (px, >= 0)
+    int _page_step           = 0;  // whole-line page height (px)
+    int _scroll_max          = 0;  // max offset = content height - visible height
+    int _prev_content_height = 0;  // height of previous cumulative text (px)
 };
 
 }  // namespace stackchan::avatar

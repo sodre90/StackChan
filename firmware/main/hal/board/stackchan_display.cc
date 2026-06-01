@@ -23,6 +23,14 @@ using namespace stackchan::avatar;
 
 #define TAG "StackChanAvatarDisplay"
 
+// Head pitch (tenths of a degree; servo range 0..900 = 0..90deg, 0 = down, 900 = up).
+// The head lifts up while listening (green light on) and lowers when it stops
+// listening / returns to standby (green light out).
+static const int HEAD_PITCH_LISTEN = 450;  // ~45deg up while listening
+static const int HEAD_PITCH_STANDBY = 150;  // lowered when the green light goes out
+static const int HEAD_SPEED_LISTEN = 400;
+static const int HEAD_SPEED_STANDBY = 200;
+
 LV_FONT_DECLARE(BUILTIN_TEXT_FONT);
 LV_FONT_DECLARE(BUILTIN_ICON_FONT);
 LV_FONT_DECLARE(font_awesome_30_4);
@@ -469,6 +477,9 @@ void StackChanAvatarDisplay::SetStatus(const char* status)
         GetHAL().setRgbColor(0, 0, 50, 0);
         GetHAL().refreshRgb();
 
+        // Green light on -> lift the head up to listen.
+        motion.movePitchWithSpeed(HEAD_PITCH_LISTEN, HEAD_SPEED_LISTEN);
+
     } else if (strcmp(status, Lang::Strings::STANDBY) == 0) {
         _is_xiaozhi_ready = true;
 
@@ -483,6 +494,9 @@ void StackChanAvatarDisplay::SetStatus(const char* status)
 
         GetHAL().setRgbColor(0, 0, 0, 0);
         GetHAL().refreshRgb();
+
+        // Green light out -> lower the head back down.
+        motion.movePitchWithSpeed(HEAD_PITCH_STANDBY, HEAD_SPEED_STANDBY);
 
     } else if (strcmp(status, Lang::Strings::SPEAKING) == 0) {
         if (speaking_modifier_id_ < 0) {
