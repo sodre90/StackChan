@@ -3,7 +3,7 @@
 #   docker compose -f docker-compose.hu.yml up --build
 #
 # Same as docker-compose.yml but uses the Hungarian-tuned Whisper model
-# (whisper/Dockerfile.cpu.hu) and the Hungarian config (config.hu.yaml).
+# (whisper/Dockerfile.hu.cuda.turbo — CUDA-accelerated) and the Hungarian config (config.hu.yaml).
 # It binds the same ports (12800/13000/14000), so run EITHER this OR the default
 # English stack — not both.
 services:
@@ -26,12 +26,20 @@ services:
   whisper:
     build:
       context: .
-      dockerfile: whisper/Dockerfile.cpu.hu
-    image: stackchan-whisper-hu
+      dockerfile: whisper/Dockerfile.hu.cuda.turbo
+    image: stackchan-whisper-hu-cuda-turbo
     ports:
       - "13000:13000"
     volumes:
       - whisper-models:/root/.cache/huggingface
+      - whisper-ct2:/root/.cache/ct2_models
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
     restart: unless-stopped
 
   tts:
@@ -44,3 +52,4 @@ services:
 
 volumes:
   whisper-models:
+  whisper-ct2:
