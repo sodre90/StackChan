@@ -17,8 +17,7 @@ ENV CT2_FORCE_CPU_ISA=AVX512
 COPY whisper_server.py .
 EXPOSE 13000
 CMD ["python3", "whisper_server.py", \
-     "--model", "Maxdorger29/whisper-large-v3-turbo-hungarian-lora", \
+     "--model", "deepdml/faster-whisper-large-v3-turbo-ct2", \
      "--device", "cpu", \
      "--compute-type", "int8", \
-     "--feature-size", "128", \
      "--port", "13000"]
