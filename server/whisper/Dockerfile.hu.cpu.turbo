@@ -1,7 +1,7 @@
 FROM docker.io/library/python:3.12-slim AS build
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
-        cmake make g++ git libopenblas-dev pybind11-dev \
+        cmake make g++ git libopenblas-dev libdnnl-dev pybind11-dev \
     && rm -rf /var/lib/apt/lists/*
 
 RUN pip3 install --no-cache-dir pybind11 setuptools wheel
@@ -17,6 +17,7 @@ RUN cd /src/ct2 && mkdir build && cd build && \
         -DWITH_CUDA=OFF \
         -DWITH_MKL=OFF \
         -DWITH_OPENBLAS=ON \
+        -DWITH_DNNL=ON \
         -DOPENMP_RUNTIME=COMP \
         -DCMAKE_INSTALL_PREFIX=/usr/local && \
     make -j$(nproc) && make install
@@ -28,7 +29,7 @@ RUN cd /src/ct2/python && \
 FROM docker.io/library/python:3.12-slim
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
-        ffmpeg libopenblas0 \
+        ffmpeg libopenblas0 libdnnl3 \
     && rm -rf /var/lib/apt/lists/*
 
 COPY --from=build /usr/local/lib/libctranslate2* /usr/local/lib/
