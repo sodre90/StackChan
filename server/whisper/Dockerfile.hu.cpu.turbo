@@ -1,51 +1,18 @@
-FROM docker.io/library/python:3.12-slim AS build
-
-RUN apt-get update && apt-get install -y --no-install-recommends \
-        cmake make g++ git libopenblas-dev libdnnl-dev pybind11-dev \
-    && rm -rf /var/lib/apt/lists/*
-
-RUN pip3 install --no-cache-dir pybind11 setuptools wheel
-
-RUN git clone --depth 1 --branch v4.8.0 \
-        https://github.com/OpenNMT/CTranslate2.git /src/ct2 && \
-    cd /src/ct2 && \
-    git submodule update --init --depth 1
-
-RUN cd /src/ct2 && mkdir build && cd build && \
-    cmake .. \
-        -DCMAKE_BUILD_TYPE=Release \
-        -DWITH_CUDA=OFF \
-        -DWITH_MKL=OFF \
-        -DWITH_OPENBLAS=ON \
-        -DWITH_DNNL=ON \
-        -DOPENMP_RUNTIME=COMP \
-        -DCMAKE_INSTALL_PREFIX=/usr/local && \
-    make -j$(nproc) && make install
-
-RUN cd /src/ct2/python && \
-    pip3 install --no-build-isolation --no-cache-dir .
-
-# --- runtime ---
 FROM docker.io/library/python:3.12-slim
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
-        ffmpeg libopenblas0 \
+        ffmpeg \
     && rm -rf /var/lib/apt/lists/*
-
-COPY --from=build /usr/local/lib/libctranslate2* /usr/local/lib/
-COPY --from=build /usr/lib/x86_64-linux-gnu/libdnnl* /usr/local/lib/
-COPY --from=build /usr/local/lib/python3.12/site-packages/ /usr/local/lib/python3.12/site-packages/
-RUN ldconfig
 
 WORKDIR /app
 RUN pip3 install --no-cache-dir \
         torch --index-url https://download.pytorch.org/whl/cpu
-RUN pip3 install --no-cache-dir --no-deps "faster-whisper>=1.0.3"
 RUN pip3 install --no-cache-dir \
-        "tokenizers>=0.13" "huggingface_hub>=0.13" \
+        "faster-whisper>=1.0.3" \
         "transformers>=4.40.0" \
-        onnxruntime av \
         fastapi uvicorn pydantic python-multipart
+
+ENV CT2_FORCE_CPU_ISA=AVX512
 
 COPY whisper_server.py .
 EXPOSE 13000
