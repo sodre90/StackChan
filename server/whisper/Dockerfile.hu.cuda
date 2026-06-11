@@ -15,13 +15,13 @@ RUN pip3 install --no-cache-dir \
 
 COPY whisper_server.py .
 EXPOSE 13000
-# Maxdorger29/whisper-large-v3-turbo-hungarian-lora — LoRA fine-tuned
-# large-v3-turbo for Hungarian. CTranslate2 weights, fixes hallucinations
-# and Hungarian character issues. int8_float16 to fit alongside Qwen LLM.
-# ~800 MB VRAM on CUDA.
+# Hungarian-tuned Whisper (sarpba/whisper-base-hungarian_v1), CUDA-accelerated
+# on NVIDIA GPUs (RTX 5070 Ti, etc.). Pre-quantized CTranslate2 in
+# quants/int8_bfloat16 subfolder. int8_float16 is the sweet spot for
+# RTX 40/50 series — fast and accurate.
 CMD ["python3", "whisper_server.py", \
-     "--model", "Maxdorger29/whisper-large-v3-turbo-hungarian-lora", \
+     "--model", "sarpba/whisper-base-hungarian_v1", \
+     "--model-subfolder", "quants/int8_bfloat16", \
      "--device", "cuda", \
      "--compute-type", "int8_float16", \
-     "--feature-size", "128", \
      "--port", "13000"]
