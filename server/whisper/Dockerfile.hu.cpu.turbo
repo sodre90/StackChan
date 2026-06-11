@@ -1,22 +1,52 @@
+FROM docker.io/library/python:3.12-slim AS build
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        cmake g++ git libopenblas-dev pybind11-dev \
+    && rm -rf /var/lib/apt/lists/*
+
+RUN pip3 install --no-cache-dir pybind11
+
+RUN git clone --depth 1 --branch v4.8.0 \
+        https://github.com/OpenNMT/CTranslate2.git /src/ct2 && \
+    cd /src/ct2 && \
+    git submodule update --init --depth 1
+
+RUN cd /src/ct2 && mkdir build && cd build && \
+    cmake .. \
+        -DCMAKE_BUILD_TYPE=Release \
+        -DWITH_CUDA=OFF \
+        -DWITH_MKL=OFF \
+        -DWITH_OPENBLAS=ON \
+        -DCMAKE_CXX_FLAGS="-march=x86-64-v4" \
+        -DCMAKE_INSTALL_PREFIX=/usr/local && \
+    make -j$(nproc) && make install
+
+RUN cd /src/ct2/python && \
+    pip3 install --no-build-isolation --no-cache-dir .
+
+# --- runtime ---
 FROM docker.io/library/python:3.12-slim
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
-        ffmpeg \
+        ffmpeg libopenblas0 \
     && rm -rf /var/lib/apt/lists/*
+
+COPY --from=build /usr/local/lib/libctranslate2* /usr/local/lib/
+COPY --from=build /usr/local/lib/python3.12/site-packages/ /usr/local/lib/python3.12/site-packages/
+RUN ldconfig
 
 WORKDIR /app
 RUN pip3 install --no-cache-dir \
         torch --index-url https://download.pytorch.org/whl/cpu
+RUN pip3 install --no-cache-dir --no-deps "faster-whisper>=1.0.3"
 RUN pip3 install --no-cache-dir \
-        "faster-whisper>=1.0.3" \
+        "tokenizers>=0.13" "huggingface_hub>=0.13" \
         "transformers>=4.40.0" \
+        onnxruntime av \
         fastapi uvicorn pydantic python-multipart
 
 COPY whisper_server.py .
 EXPOSE 13000
-# Maxdorger29/whisper-large-v3-turbo-hungarian-lora — LoRA fine-tuned
-# large-v3-turbo for Hungarian on CPU. int8 quantization keeps RAM ~1.5 GB
-# and leaves all GPU VRAM for Qwen LLM.
 CMD ["python3", "whisper_server.py", \
      "--model", "Maxdorger29/whisper-large-v3-turbo-hungarian-lora", \
      "--device", "cpu", \
