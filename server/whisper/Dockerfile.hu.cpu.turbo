@@ -29,10 +29,11 @@ RUN cd /src/ct2/python && \
 FROM docker.io/library/python:3.12-slim
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
-        ffmpeg libopenblas0 libdnnl3 \
+        ffmpeg libopenblas0 \
     && rm -rf /var/lib/apt/lists/*
 
 COPY --from=build /usr/local/lib/libctranslate2* /usr/local/lib/
+COPY --from=build /usr/lib/x86_64-linux-gnu/libdnnl* /usr/local/lib/
 COPY --from=build /usr/local/lib/python3.12/site-packages/ /usr/local/lib/python3.12/site-packages/
 RUN ldconfig
 
