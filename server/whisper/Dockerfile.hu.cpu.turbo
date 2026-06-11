@@ -1,0 +1,25 @@
+FROM docker.io/library/python:3.12-slim
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        ffmpeg \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /app
+RUN pip3 install --no-cache-dir \
+        torch --index-url https://download.pytorch.org/whl/cpu
+RUN pip3 install --no-cache-dir \
+        "faster-whisper>=1.0.3" \
+        "transformers>=4.40.0" \
+        fastapi uvicorn pydantic python-multipart
+
+COPY whisper_server.py .
+EXPOSE 13000
+# Maxdorger29/whisper-large-v3-turbo-hungarian-lora — LoRA fine-tuned
+# large-v3-turbo for Hungarian on CPU. int8 quantization keeps RAM ~1.5 GB
+# and leaves all GPU VRAM for Qwen LLM.
+CMD ["python3", "whisper_server.py", \
+     "--model", "Maxdorger29/whisper-large-v3-turbo-hungarian-lora", \
+     "--device", "cpu", \
+     "--compute-type", "int8", \
+     "--feature-size", "128", \
+     "--port", "13000"]
