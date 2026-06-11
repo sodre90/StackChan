@@ -1,0 +1,27 @@
+FROM docker.io/nvidia/cuda:13.2.0-cudnn-runtime-ubuntu22.04
+
+ENV DEBIAN_FRONTEND=noninteractive
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        python3 python3-pip ffmpeg \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /app
+RUN pip3 install --no-cache-dir \
+        "torch[cpu]" \
+        "faster-whisper>=1.0.3" \
+        "ctranslate2>=4.5.0" \
+        "transformers>=4.40.0" \
+        fastapi uvicorn pydantic python-multipart
+
+COPY whisper_server.py .
+EXPOSE 13000
+# Maxdorger29/whisper-large-v3-turbo-hungarian-lora — LoRA fine-tuned
+# large-v3-turbo for Hungarian. CTranslate2 weights, fixes hallucinations
+# and Hungarian character issues. int8_float16 to fit alongside Qwen LLM.
+# ~800 MB VRAM on CUDA.
+CMD ["python3", "whisper_server.py", \
+     "--model", "Maxdorger29/whisper-large-v3-turbo-hungarian-lora", \
+     "--device", "cuda", \
+     "--compute-type", "int8_float16", \
+     "--feature-size", "128", \
+     "--port", "13000"]
