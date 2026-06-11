@@ -17,6 +17,7 @@ RUN cd /src/ct2 && mkdir build && cd build && \
         -DWITH_CUDA=OFF \
         -DWITH_MKL=OFF \
         -DWITH_OPENBLAS=ON \
+        -DOPENMP_RUNTIME=COMP \
         -DCMAKE_CXX_FLAGS="-march=x86-64-v4" \
         -DCMAKE_INSTALL_PREFIX=/usr/local && \
     make -j$(nproc) && make install
