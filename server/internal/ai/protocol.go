@@ -196,6 +196,10 @@ func Initialize(config Config) {
 		"vad_rms_threshold", config.VADRMSThreshold,
 		"ha_url", config.HAUrl,
 		"ha_configured", config.HAUrl != "" && config.HAToken != "",
+		"quiet_hours", config.QuietHours.Enabled,
+		"quiet_start", config.QuietHours.Start,
+		"quiet_weekday_end", config.QuietHours.WeekdayEnd,
+		"quiet_weekend_end", config.QuietHours.WeekendEnd,
 	)
 }
 
@@ -528,6 +532,11 @@ vadLoop:
 
 	if len(packets) == 0 {
 		logger.Debugf(ctx, "Packets already consumed by concurrent handler — skipping ASR")
+		return
+	}
+
+	if isQuietHours() {
+		logger.Infof(ctx, "Quiet hours active, ignoring speech (%d packets)", len(packets))
 		return
 	}
 

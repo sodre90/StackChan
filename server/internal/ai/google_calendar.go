@@ -289,6 +289,10 @@ func (gc *googleCalendar) runAnnouncer(ctx context.Context) {
 }
 
 func (gc *googleCalendar) tick(ctx context.Context) {
+	if isQuietHours() {
+		return
+	}
+
 	now := time.Now()
 	events, err := gc.listEvents(ctx, now, now.Add(calendarLookahead), 50)
 	if err != nil {

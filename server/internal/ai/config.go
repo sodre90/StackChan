@@ -131,6 +131,9 @@ type Config struct {
 	// Each milestone is announced once as the countdown crosses it. Overrides
 	// GoogleCalendarAnnounceMinutes when non-empty.
 	GoogleCalendarReminderMinutes []int `yaml:"google_calendar_reminder_minutes" json:"google_calendar_reminder_minutes"`
+
+	// Quiet hours: suppress voice interaction and proactive announcements overnight.
+	QuietHours QuietHoursConfig `yaml:"quiet_hours" json:"quiet_hours"`
 }
 
 // DefaultConfig returns the default AI configuration for local Ollama setup

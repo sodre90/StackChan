@@ -87,3 +87,11 @@ ha_url: "http://192.168.2.166:8123"
 google_calendar_id: "primary"
 google_calendar_announce_minutes: 10
 google_calendar_reminder_minutes: [30, 10, 1]
+
+# Quiet hours: suppress voice interaction and proactive announcements overnight.
+# Mon-Fri: 21:00 → 08:00. Sat/Sun mornings extend to 09:00.
+quiet_hours:
+  enabled: true
+  start: "21:00"
+  weekday_end: "08:00"
+  weekend_end: "09:00"
