@@ -1,9 +1,10 @@
 # StackChan — Hungarian variant (Docker Compose).
 #
-#   docker compose -f docker-compose.hu.yml up --build
+#   podman-compose -f docker-compose.hu.yml up -d --build
 #
-# Same as docker-compose.yml but uses the Hungarian-tuned Whisper model
-# (whisper/Dockerfile.hu.cpu.turbo — CPU) and the Hungarian config (config.hu.yaml).
+# Same as docker-compose.yml but uses the Hungarian-tuned Whisper model on the GPU
+# (whisper/Dockerfile.hu.cuda — sarpba/whisper-base-hungarian_v1, CUDA int8_float16,
+# ~355 MB VRAM, ~120 ms/utterance) and the Hungarian config (config.hu.yaml).
 # It binds the same ports (12800/13000/14000), so run EITHER this OR the default
 # English stack — not both.
 services:
@@ -26,10 +27,14 @@ services:
   whisper:
     build:
       context: .
-      dockerfile: whisper/Dockerfile.hu.cpu.turbo
-    image: stackchan-whisper-hu-cpu-turbo
+      dockerfile: whisper/Dockerfile.hu.cuda
+    image: stackchan-whisper-hu-cuda
     ports:
       - "13000:13000"
+    devices:
+      - "nvidia.com/gpu=all"
+    security_opt:
+      - "label=disable"
     volumes:
       - whisper-models:/root/.cache/huggingface
       - whisper-ct2:/root/.cache/ct2_models
