@@ -332,7 +332,7 @@ func StartPingTime(ctx context.Context) {
 	})
 }
 
-// CheckExpiredLinks checks and cleans up App client connections that have been inactive for over 60 seconds
+// CheckExpiredLinks checks and cleans up App client connections that have been inactive for over 15 seconds
 func CheckExpiredLinks(ctx context.Context) {
 	now := time.Now()
 	var expiredClients []*AppClient
@@ -347,10 +347,10 @@ func CheckExpiredLinks(ctx context.Context) {
 				// Iterate over StackChanClientPool to clean up CallAppClient and CameraSubscriptionList
 				stackChanClientPool.Range(func(_, scValue any) bool {
 					stackChanClient, ok := scValue.(*StackChanClient)
-					stackChanClient.mu.Lock()
 					if !ok {
 						return true
 					}
+					stackChanClient.mu.Lock()
 					// Clean up CallAppClient
 					if stackChanClient.CallAppClient == client {
 						stackChanClient.CallAppClient = nil
