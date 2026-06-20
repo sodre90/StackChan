@@ -110,20 +110,28 @@ func Handler(r *ghttp.Request) {
 			if macAddr == mac {
 				isHave = true
 				client = stackChanClient
+				// Capture what we need under the lock, then release it BEFORE forwarding.
+				// forwardMessage re-acquires client.mu to serialise the write; calling it
+				// while we still hold client.mu would self-deadlock (sync.RWMutex is not
+				// reentrant). Releasing first also avoids holding the lock across a network write.
 				client.mu.Lock()
 				client.Conn = ws
-				if client.CallAppClient != nil {
-					reconnectMsg := createStringMessage(TextMessage, "The equipment has been reconnected.")
-					msgType := websocket.BinaryMessage
-					forwardMessage(ctx, client.CallAppClient.Conn, &msgType, reconnectMsg, client.CallAppClient.mu)
-				}
-				if len(client.CameraSubscriptionList) > 0 {
-					onMsg := createMessage(OnCamera, nil)
-					onType := websocket.BinaryMessage
-					forwardMessage(ctx, client.Conn, &onType, onMsg, client.mu)
-				}
+				callAppClient := client.CallAppClient
+				hasCameraSubs := len(client.CameraSubscriptionList) > 0
+				conn := client.Conn
 				client.LastTime = time.Now()
 				client.mu.Unlock()
+
+				if callAppClient != nil {
+					reconnectMsg := createStringMessage(TextMessage, "The equipment has been reconnected.")
+					msgType := websocket.BinaryMessage
+					forwardMessage(ctx, callAppClient.Conn, &msgType, reconnectMsg, callAppClient.mu)
+				}
+				if hasCameraSubs {
+					onMsg := createMessage(OnCamera, nil)
+					onType := websocket.BinaryMessage
+					forwardMessage(ctx, conn, &onType, onMsg, client.mu)
+				}
 				return false
 			}
 			return true
