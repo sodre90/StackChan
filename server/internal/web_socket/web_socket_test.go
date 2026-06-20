@@ -8,7 +8,12 @@ package web_socket
 import (
 	"context"
 	"encoding/binary"
+	"fmt"
+	"sync"
 	"testing"
+	"time"
+
+	"github.com/gorilla/websocket"
 )
 
 // makeMsg builds a custom-protocol frame: 1-byte type, 4-byte big-endian
@@ -62,4 +67,61 @@ func TestParseBinaryMessage(t *testing.T) {
 			}
 		})
 	}
+}
+
+// TestConcurrentCameraSubscription exercises the camera-subscription state from
+// both sides at once: the device streaming JPEG frames (which reads
+// CameraSubscriptionList) while Apps subscribe/unsubscribe (which mutate it).
+// Run with -race; before the locking fix the JPEG path read the slice without
+// holding client.mu, racing the locked append/rebuild on the App path.
+// Conns are nil throughout — forwardMessage treats nil as offline and no-ops.
+func TestConcurrentCameraSubscription(t *testing.T) {
+	ctx := context.Background()
+	mac := "RACEMAC00001"
+	sc := &StackChanClient{Mac: mac, mu: &sync.RWMutex{}}
+	stackChanClientPool.Store(mac, sc)
+	defer stackChanClientPool.Delete(mac)
+
+	bin := websocket.BinaryMessage
+	var wg sync.WaitGroup
+	stop := make(chan struct{})
+
+	// Device side: stream JPEG frames continuously.
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		jpeg := createMessage(Jpeg, []byte("frame"))
+		for {
+			select {
+			case <-stop:
+				return
+			default:
+				readStackChanMessage(ctx, sc, &bin, jpeg)
+			}
+		}
+	}()
+
+	// App side: several apps churn their subscription.
+	for i := 0; i < 4; i++ {
+		ac := &AppClient{Mac: mac, mu: &sync.RWMutex{}, DeviceId: fmt.Sprintf("d%d", i)}
+		wg.Add(1)
+		go func(ac *AppClient) {
+			defer wg.Done()
+			on := createMessage(OnCamera, []byte(mac))
+			off := createMessage(OffCamera, []byte(mac))
+			for {
+				select {
+				case <-stop:
+					return
+				default:
+					readAppClientMessage(ctx, ac, &bin, on)
+					readAppClientMessage(ctx, ac, &bin, off)
+				}
+			}
+		}(ac)
+	}
+
+	time.Sleep(150 * time.Millisecond)
+	close(stop)
+	wg.Wait()
 }

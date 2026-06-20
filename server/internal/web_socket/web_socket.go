@@ -424,24 +424,30 @@ func readStackChanMessage(ctx context.Context, client *StackChanClient, messageT
 		case ControlAvatar, ControlMotion, OnCamera, OffCamera:
 			break
 		case RefuseCall:
-			// Refused call, remove and notify appClient
+			// Refused call. Read+clear CallAppClient under the lock; forward
+			// outside it (forwardMessage re-locks to serialise the write).
+			client.mu.Lock()
 			appClient := client.CallAppClient
+			client.CallAppClient = nil
+			client.mu.Unlock()
 			if appClient != nil {
 				forwardMessage(ctx, appClient.Conn, messageType, msg, appClient.mu)
-				client.mu.Lock()
-				client.CallAppClient = nil
-				client.mu.Unlock()
 			}
 			break
 		case AgreeCall:
-			// Agreed to call
+			// Agreed to call. Append the caller and decide whether this is the
+			// first subscriber — all under the lock — then forward outside it.
+			client.mu.Lock()
 			appClient := client.CallAppClient
+			becameFirst := false
+			if appClient != nil {
+				client.CameraSubscriptionList = append(client.CameraSubscriptionList, appClient)
+				becameFirst = len(client.CameraSubscriptionList) == 1
+			}
+			client.mu.Unlock()
 			if appClient != nil {
 				forwardMessage(ctx, appClient.Conn, messageType, msg, appClient.mu)
-				client.mu.Lock()
-				client.CameraSubscriptionList = append(client.CameraSubscriptionList, appClient)
-				client.mu.Unlock()
-				if len(client.CameraSubscriptionList) == 1 {
+				if becameFirst {
 					onMsg := createMessage(OnCamera, nil)
 					onType := websocket.BinaryMessage
 					forwardMessage(ctx, client.Conn, &onType, onMsg, client.mu)
@@ -449,22 +455,26 @@ func readStackChanMessage(ctx context.Context, client *StackChanClient, messageT
 			}
 			break
 		case HangupCall:
-			// Hang up call
+			// Hang up call. Rebuild the subscription list (dropping the caller) and
+			// decide whether it is now empty — all under the lock — then forward.
+			client.mu.Lock()
 			appClient := client.CallAppClient
+			nowEmpty := false
 			if appClient != nil {
-				forwardMessage(ctx, appClient.Conn, messageType, msg, appClient.mu)
-				// Remove the client from the subscription list
 				newList := client.CameraSubscriptionList[:0]
 				for _, subClient := range client.CameraSubscriptionList {
 					if subClient != appClient {
 						newList = append(newList, subClient)
 					}
 				}
-				client.mu.Lock()
 				client.CameraSubscriptionList = newList
-				client.mu.Unlock()
+				nowEmpty = len(newList) == 0
+			}
+			client.mu.Unlock()
+			if appClient != nil {
+				forwardMessage(ctx, appClient.Conn, messageType, msg, appClient.mu)
 				// If the subscription list is empty, notify to turn off the camera
-				if len(client.CameraSubscriptionList) == 0 {
+				if nowEmpty {
 					offMsg := createMessage(OffCamera, nil)
 					offType := websocket.BinaryMessage
 					forwardMessage(ctx, client.Conn, &offType, offMsg, client.mu)
@@ -488,22 +498,28 @@ func readStackChanMessage(ctx context.Context, client *StackChanClient, messageT
 
 			break
 		case Jpeg:
-			subscribers := client.CameraSubscriptionList
+			// Copy the subscriber list under the read lock so streaming frames never
+			// race the locked append/rebuild on the App path. allDead = every
+			// subscriber's connection is gone, so tell the device to stop the camera.
+			client.mu.RLock()
+			subscribers := make([]*AppClient, len(client.CameraSubscriptionList))
+			copy(subscribers, client.CameraSubscriptionList)
+			client.mu.RUnlock()
 			if len(subscribers) > 0 {
-				var isAll = true
+				allDead := true
 				for _, subClient := range subscribers {
 					if subClient.Conn != nil {
-						isAll = false
+						allDead = false
 					}
 					forwardMessage(ctx, subClient.Conn, messageType, msg, subClient.mu)
 				}
-				if isAll {
-					msg = createMessage(OffCamera, nil)
-					forwardMessage(ctx, client.Conn, messageType, msg, client.mu)
+				if allDead {
+					offMsg := createMessage(OffCamera, nil)
+					forwardMessage(ctx, client.Conn, messageType, offMsg, client.mu)
 				}
 			} else {
-				msg = createMessage(OffCamera, nil)
-				forwardMessage(ctx, client.Conn, messageType, msg, client.mu)
+				offMsg := createMessage(OffCamera, nil)
+				forwardMessage(ctx, client.Conn, messageType, offMsg, client.mu)
 			}
 			break
 		case GetAvatarPosture:
