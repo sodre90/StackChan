@@ -128,12 +128,12 @@ func Handler(r *ghttp.Request) {
 				if callAppClient != nil {
 					reconnectMsg := createStringMessage(TextMessage, "The equipment has been reconnected.")
 					msgType := websocket.BinaryMessage
-					forwardMessage(ctx, callAppClient.Conn, &msgType, reconnectMsg, callAppClient.mu)
+					forwardMessage(ctx, &callAppClient.Conn, &msgType, reconnectMsg, callAppClient.mu)
 				}
 				if hasCameraSubs {
 					onMsg := createMessage(OnCamera, nil)
 					onType := websocket.BinaryMessage
-					forwardMessage(ctx, conn, &onType, onMsg, client.mu)
+					forwardMessage(ctx, &conn, &onType, onMsg, client.mu)
 				}
 				return false
 			}
@@ -156,7 +156,7 @@ func Handler(r *ghttp.Request) {
 			// Notify App
 			appClients := getAppClients(client.Mac)
 			for _, appClient := range appClients {
-				forwardMessage(ctx, appClient.Conn, &msgType, onlineMsg, appClient.mu)
+				forwardMessage(ctx, &appClient.Conn, &msgType, onlineMsg, appClient.mu)
 			}
 		}
 		logger.Info(ctx, "There is a StackChen connected to the service.", client.Mac)
@@ -233,11 +233,11 @@ func Handler(r *ghttp.Request) {
 		if stackChanClient == nil {
 			offlineMsg := createStringMessage(DeviceOffline, "Your StackChan is offline.")
 			msgType := websocket.BinaryMessage
-			forwardMessage(ctx, client.Conn, &msgType, offlineMsg, client.mu)
+			forwardMessage(ctx, &client.Conn, &msgType, offlineMsg, client.mu)
 		} else {
 			onlineMsg := createStringMessage(DeviceOnline, "Your StackChan has been launched.")
 			msgType := websocket.BinaryMessage
-			forwardMessage(ctx, client.Conn, &msgType, onlineMsg, client.mu)
+			forwardMessage(ctx, &client.Conn, &msgType, onlineMsg, client.mu)
 		}
 
 		defer func() {
@@ -333,7 +333,7 @@ func StartPingTime(ctx context.Context) {
 	// Iterate over StackChanClientPool
 	stackChanClientPool.Range(func(_, value any) bool {
 		client := value.(*StackChanClient)
-		forwardMessage(ctx, client.Conn, &messageType, message, client.mu)
+		forwardMessage(ctx, &client.Conn, &messageType, message, client.mu)
 		return true // continue iteration
 	})
 
@@ -341,7 +341,7 @@ func StartPingTime(ctx context.Context) {
 	appClientPool.Range(func(_, value any) bool {
 		clients := value.([]*AppClient)
 		for _, client := range clients {
-			forwardMessage(ctx, client.Conn, &messageType, message, client.mu)
+			forwardMessage(ctx, &client.Conn, &messageType, message, client.mu)
 		}
 		return true // continue iteration
 	})
@@ -386,7 +386,7 @@ func CheckExpiredLinks(ctx context.Context) {
 					if removedCamera && len(newCamera) == 0 {
 						msg := createMessage(OffCamera, nil)
 						msgType := websocket.BinaryMessage
-						forwardMessage(ctx, stackChanClient.Conn, &msgType, msg, stackChanClient.mu)
+						forwardMessage(ctx, &stackChanClient.Conn, &msgType, msg, stackChanClient.mu)
 					}
 					return true
 				})
@@ -405,8 +405,8 @@ func CheckExpiredLinks(ctx context.Context) {
 
 	for _, client := range expiredClients {
 		logger.Infof(ctx, "Kicked out an expired App client: %s", client.Mac)
-		err := client.Conn.Close()
-		if err != nil {
+		if err := client.Conn.Close(); err != nil {
+			logger.Debugf(ctx, "Error closing expired App client %s: %v", client.Mac, err)
 		}
 	}
 }
@@ -431,7 +431,7 @@ func readStackChanMessage(ctx context.Context, client *StackChanClient, messageT
 			client.CallAppClient = nil
 			client.mu.Unlock()
 			if appClient != nil {
-				forwardMessage(ctx, appClient.Conn, messageType, msg, appClient.mu)
+				forwardMessage(ctx, &appClient.Conn, messageType, msg, appClient.mu)
 			}
 			break
 		case AgreeCall:
@@ -446,11 +446,11 @@ func readStackChanMessage(ctx context.Context, client *StackChanClient, messageT
 			}
 			client.mu.Unlock()
 			if appClient != nil {
-				forwardMessage(ctx, appClient.Conn, messageType, msg, appClient.mu)
+				forwardMessage(ctx, &appClient.Conn, messageType, msg, appClient.mu)
 				if becameFirst {
 					onMsg := createMessage(OnCamera, nil)
 					onType := websocket.BinaryMessage
-					forwardMessage(ctx, client.Conn, &onType, onMsg, client.mu)
+					forwardMessage(ctx, &client.Conn, &onType, onMsg, client.mu)
 				}
 			}
 			break
@@ -472,12 +472,12 @@ func readStackChanMessage(ctx context.Context, client *StackChanClient, messageT
 			}
 			client.mu.Unlock()
 			if appClient != nil {
-				forwardMessage(ctx, appClient.Conn, messageType, msg, appClient.mu)
+				forwardMessage(ctx, &appClient.Conn, messageType, msg, appClient.mu)
 				// If the subscription list is empty, notify to turn off the camera
 				if nowEmpty {
 					offMsg := createMessage(OffCamera, nil)
 					offType := websocket.BinaryMessage
-					forwardMessage(ctx, client.Conn, &offType, offMsg, client.mu)
+					forwardMessage(ctx, &client.Conn, &offType, offMsg, client.mu)
 				}
 			}
 			break
@@ -492,7 +492,7 @@ func readStackChanMessage(ctx context.Context, client *StackChanClient, messageT
 				return
 			}
 			newMsg := createStringMessage(GetDeviceName, name)
-			forwardMessage(ctx, client.Conn, messageType, newMsg, client.mu)
+			forwardMessage(ctx, &client.Conn, messageType, newMsg, client.mu)
 			break
 		case Opus:
 
@@ -511,21 +511,21 @@ func readStackChanMessage(ctx context.Context, client *StackChanClient, messageT
 					if subClient.Conn != nil {
 						allDead = false
 					}
-					forwardMessage(ctx, subClient.Conn, messageType, msg, subClient.mu)
+					forwardMessage(ctx, &subClient.Conn, messageType, msg, subClient.mu)
 				}
 				if allDead {
 					offMsg := createMessage(OffCamera, nil)
-					forwardMessage(ctx, client.Conn, messageType, offMsg, client.mu)
+					forwardMessage(ctx, &client.Conn, messageType, offMsg, client.mu)
 				}
 			} else {
 				offMsg := createMessage(OffCamera, nil)
-				forwardMessage(ctx, client.Conn, messageType, offMsg, client.mu)
+				forwardMessage(ctx, &client.Conn, messageType, offMsg, client.mu)
 			}
 			break
 		case GetAvatarPosture:
 			appClients := getAppClients(client.Mac)
 			for _, appClient := range appClients {
-				forwardMessage(ctx, appClient.Conn, messageType, msg, appClient.mu)
+				forwardMessage(ctx, &appClient.Conn, messageType, msg, appClient.mu)
 			}
 			break
 		default:
@@ -533,7 +533,7 @@ func readStackChanMessage(ctx context.Context, client *StackChanClient, messageT
 			appClients := getAppClients(client.Mac)
 			if appClients != nil {
 				for _, appClient := range appClients {
-					forwardMessage(ctx, appClient.Conn, messageType, msg, appClient.mu)
+					forwardMessage(ctx, &appClient.Conn, messageType, msg, appClient.mu)
 				}
 			}
 		}
@@ -541,7 +541,7 @@ func readStackChanMessage(ctx context.Context, client *StackChanClient, messageT
 		appClients := getAppClients(client.Mac)
 		if appClients != nil {
 			for _, appClient := range appClients {
-				forwardMessage(ctx, appClient.Conn, messageType, msg, appClient.mu)
+				forwardMessage(ctx, &appClient.Conn, messageType, msg, appClient.mu)
 			}
 		}
 	} else if *messageType == websocket.PingMessage {
@@ -572,16 +572,16 @@ func readAppClientMessage(ctx context.Context, client *AppClient, messageType *i
 			}
 			newMsg := createStringMessage(GetDeviceName, name)
 			logger.Infof(ctx, "Device name found, returning: %s", name)
-			forwardMessage(ctx, client.Conn, messageType, newMsg, client.mu)
+			forwardMessage(ctx, &client.Conn, messageType, newMsg, client.mu)
 			break
 		case UpdateDeviceName:
 			stackChanClient := getStackChanClient(client.Mac)
 			if stackChanClient != nil {
-				forwardMessage(ctx, stackChanClient.Conn, messageType, msg, stackChanClient.mu)
+				forwardMessage(ctx, &stackChanClient.Conn, messageType, msg, stackChanClient.mu)
 			}
 			appClients := getAppClients(client.Mac)
 			for _, appClient := range appClients {
-				forwardMessage(ctx, appClient.Conn, messageType, msg, appClient.mu)
+				forwardMessage(ctx, &appClient.Conn, messageType, msg, appClient.mu)
 			}
 			break
 		case Opus:
@@ -601,7 +601,7 @@ func readAppClientMessage(ctx context.Context, client *AppClient, messageType *i
 				showPhone := stackChanClient.phoneScreen
 				stackChanClient.mu.RUnlock()
 				if showPhone {
-					forwardMessage(ctx, stackChanClient.Conn, messageType, newMsg, stackChanClient.mu)
+					forwardMessage(ctx, &stackChanClient.Conn, messageType, newMsg, stackChanClient.mu)
 				}
 			}
 			break
@@ -616,7 +616,7 @@ func readAppClientMessage(ctx context.Context, client *AppClient, messageType *i
 			newMsg := createMessage(msgType, data)
 			stackChanClient := getStackChanClient(macAddr)
 			if stackChanClient != nil {
-				forwardMessage(ctx, stackChanClient.Conn, messageType, newMsg, stackChanClient.mu)
+				forwardMessage(ctx, &stackChanClient.Conn, messageType, newMsg, stackChanClient.mu)
 			} else {
 				logger.Infof(ctx, "StackChan is currently offline")
 			}
@@ -631,12 +631,12 @@ func readAppClientMessage(ctx context.Context, client *AppClient, messageType *i
 			newMsg := createMessage(msgType, data)
 			stackChanClient := getStackChanClient(macAddr)
 			if stackChanClient != nil {
-				forwardMessage(ctx, stackChanClient.Conn, messageType, newMsg, stackChanClient.mu)
+				forwardMessage(ctx, &stackChanClient.Conn, messageType, newMsg, stackChanClient.mu)
 			}
 			appClients := getAppClients(macAddr)
 			if appClients != nil {
 				for _, appClient := range appClients {
-					forwardMessage(ctx, appClient.Conn, messageType, newMsg, appClient.mu)
+					forwardMessage(ctx, &appClient.Conn, messageType, newMsg, appClient.mu)
 				}
 			}
 			break
@@ -655,12 +655,12 @@ func readAppClientMessage(ctx context.Context, client *AppClient, messageType *i
 					stackChanClient.CallAppClient = client
 					stackChanClient.mu.Unlock()
 					newMsg := createMessage(msgType, data)
-					forwardMessage(ctx, stackChanClient.Conn, messageType, newMsg, stackChanClient.mu)
+					forwardMessage(ctx, &stackChanClient.Conn, messageType, newMsg, stackChanClient.mu)
 				} else {
 					stackChanClient.mu.Unlock()
 					// Notify App that the other side is already in a call
 					newMsg := createStringMessage(inCall, "The other party is currently in a call")
-					forwardMessage(ctx, client.Conn, messageType, newMsg, client.mu)
+					forwardMessage(ctx, &client.Conn, messageType, newMsg, client.mu)
 				}
 			}
 			break
@@ -688,11 +688,11 @@ func readAppClientMessage(ctx context.Context, client *AppClient, messageType *i
 				mu := stackChanClient.mu
 				stackChanClient.mu.Unlock()
 
-				forwardMessage(ctx, conn, messageType, msg, mu)
+				forwardMessage(ctx, &conn, messageType, msg, mu)
 				if nowEmpty {
 					offMsg := createMessage(OffCamera, nil)
 					offType := websocket.BinaryMessage
-					forwardMessage(ctx, conn, &offType, offMsg, mu)
+					forwardMessage(ctx, &conn, &offType, offMsg, mu)
 				}
 				return false
 			})
@@ -712,7 +712,7 @@ func readAppClientMessage(ctx context.Context, client *AppClient, messageType *i
 				if !alreadySubscribed {
 					stackChanClient.CameraSubscriptionList = append(stackChanClient.CameraSubscriptionList, client)
 					stackChanClient.mu.Unlock()
-					forwardMessage(ctx, stackChanClient.Conn, messageType, msg, stackChanClient.mu)
+					forwardMessage(ctx, &stackChanClient.Conn, messageType, msg, stackChanClient.mu)
 				} else {
 					stackChanClient.mu.Unlock()
 				}
@@ -736,7 +736,7 @@ func readAppClientMessage(ctx context.Context, client *AppClient, messageType *i
 				stackChanClient.CameraSubscriptionList = newList
 				stackChanClient.mu.Unlock()
 				if shouldNotify {
-					forwardMessage(ctx, stackChanClient.Conn, messageType, msg, stackChanClient.mu)
+					forwardMessage(ctx, &stackChanClient.Conn, messageType, msg, stackChanClient.mu)
 				}
 			}
 			break
@@ -749,7 +749,7 @@ func readAppClientMessage(ctx context.Context, client *AppClient, messageType *i
 				if stackChanClient.phoneScreen == false {
 					stackChanClient.phoneScreen = true
 					stackChanClient.mu.Unlock()
-					forwardMessage(ctx, stackChanClient.Conn, messageType, msg, stackChanClient.mu)
+					forwardMessage(ctx, &stackChanClient.Conn, messageType, msg, stackChanClient.mu)
 				} else {
 					stackChanClient.mu.Unlock()
 				}
@@ -764,7 +764,7 @@ func readAppClientMessage(ctx context.Context, client *AppClient, messageType *i
 				if stackChanClient.phoneScreen == true {
 					stackChanClient.phoneScreen = false
 					stackChanClient.mu.Unlock()
-					forwardMessage(ctx, stackChanClient.Conn, messageType, msg, stackChanClient.mu)
+					forwardMessage(ctx, &stackChanClient.Conn, messageType, msg, stackChanClient.mu)
 				} else {
 					stackChanClient.mu.Unlock()
 				}
@@ -774,26 +774,26 @@ func readAppClientMessage(ctx context.Context, client *AppClient, messageType *i
 			// Dance message
 			stackChanClient := getStackChanClient(client.Mac)
 			if stackChanClient != nil {
-				forwardMessage(ctx, stackChanClient.Conn, messageType, msg, stackChanClient.mu)
+				forwardMessage(ctx, &stackChanClient.Conn, messageType, msg, stackChanClient.mu)
 			}
 			break
 		case GetAvatarPosture:
 			stackChanClient := getStackChanClient(client.Mac)
 			if stackChanClient != nil {
-				forwardMessage(ctx, stackChanClient.Conn, messageType, msg, stackChanClient.mu)
+				forwardMessage(ctx, &stackChanClient.Conn, messageType, msg, stackChanClient.mu)
 			}
 		default:
 			logger.Infof(ctx, "Unknown binary msgType: %d", msgType)
 			stackChanClient := getStackChanClient(client.Mac)
 			if stackChanClient != nil {
-				forwardMessage(ctx, stackChanClient.Conn, messageType, msg, stackChanClient.mu)
+				forwardMessage(ctx, &stackChanClient.Conn, messageType, msg, stackChanClient.mu)
 			}
 		}
 	} else if *messageType == websocket.TextMessage {
 		// Directly forward other message types
 		stackChanClient := getStackChanClient(client.Mac)
 		if stackChanClient != nil {
-			forwardMessage(ctx, stackChanClient.Conn, messageType, msg, stackChanClient.mu)
+			forwardMessage(ctx, &stackChanClient.Conn, messageType, msg, stackChanClient.mu)
 		}
 	} else if *messageType == websocket.PingMessage {
 		logger.Info(ctx, "Received ping message from App side")
@@ -801,18 +801,20 @@ func readAppClientMessage(ctx context.Context, client *AppClient, messageType *i
 }
 
 // forwardMessage forwards a message to the specified connection, with mutex for concurrency safety
-func forwardMessage(ctx context.Context, conn *websocket.Conn, messageType *int, msg *[]byte, mu *sync.RWMutex) {
-	if conn == nil {
-		logger.Infof(ctx, "StackChan is currently offline")
-		return
-	}
+// forwardMessage writes a message to the connection, holding mu for the whole
+// operation. connPtr points at the client's Conn field (not a pre-read value)
+// so the read happens under mu — the same lock that guards Conn rewrites on
+// reconnect — eliminating the data race between forwarding and reconnects.
+func forwardMessage(ctx context.Context, connPtr **websocket.Conn, messageType *int, msg *[]byte, mu *sync.RWMutex) {
 	mu.Lock()
 	defer mu.Unlock()
-	err := conn.WriteMessage(*messageType, *msg)
-	if err != nil {
-		//logger.Info(ctx, "Message forwarding failed: %v", err)
-	} else {
-		//logger.Info(ctx, "Message sent successfully")
+	conn := *connPtr
+	if conn == nil {
+		logger.Infof(ctx, "Forward skipped: connection is offline")
+		return
+	}
+	if err := conn.WriteMessage(*messageType, *msg); err != nil {
+		logger.Debugf(ctx, "Forward failed, dropping message: %v", err)
 	}
 }
 

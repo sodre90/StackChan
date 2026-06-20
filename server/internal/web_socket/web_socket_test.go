@@ -101,6 +101,23 @@ func TestConcurrentCameraSubscription(t *testing.T) {
 		}
 	}()
 
+	// Reconnect churn: rewrite the device's Conn under the lock, racing the
+	// forwardMessage reads of sc.Conn. nil is fine — forwardMessage skips it.
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		for {
+			select {
+			case <-stop:
+				return
+			default:
+				sc.mu.Lock()
+				sc.Conn = nil
+				sc.mu.Unlock()
+			}
+		}
+	}()
+
 	// App side: several apps churn their subscription.
 	for i := 0; i < 4; i++ {
 		ac := &AppClient{Mac: mac, mu: &sync.RWMutex{}, DeviceId: fmt.Sprintf("d%d", i)}
