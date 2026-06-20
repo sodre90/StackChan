@@ -12,6 +12,7 @@ import (
 	"math/rand"
 	"net"
 	"net/http"
+	"stackChan/internal/auth"
 	"stackChan/internal/service"
 	"sync"
 	"time"
@@ -90,6 +91,15 @@ func Handler(r *ghttp.Request) {
 	deviceType := r.Get("deviceType").String()
 	if mac == "" || deviceType == "" {
 		r.Response.Write("The mac and deviceType parameters are empty.")
+		return
+	}
+
+	// Gate the robot side with the shared bearer token (the firmware sends it
+	// from NVS). The app side (deviceType=App) is intentionally left open: the
+	// official companion app is a closed-source binary that cannot carry a token.
+	if deviceType == "StackChan" && !auth.Validate(r.Request.Header.Get("Authorization")) {
+		logger.Warningf(ctx, "Relay WS auth rejected: mac=%s remote=%s", mac, r.Request.RemoteAddr)
+		r.Response.WriteStatus(http.StatusUnauthorized, "unauthorized")
 		return
 	}
 
