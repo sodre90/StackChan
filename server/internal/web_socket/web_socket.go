@@ -289,13 +289,16 @@ func parseBinaryMessage(ctx context.Context, msg *[]byte) (byte, int, []byte, bo
 
 	msgType := (*msg)[0]
 	dataLen := int(binary.BigEndian.Uint32((*msg)[1:5]))
-	payload := (*msg)[5 : 5+dataLen]
 
-	if len(*msg)-5 != dataLen {
+	// Validate the declared length against the actual body BEFORE slicing.
+	// dataLen is attacker-controlled (a 4-byte header field, up to ~4 GB); slicing
+	// first would panic with slice-bounds-out-of-range on any oversized claim.
+	if dataLen != len(*msg)-5 {
 		logger.Warningf(ctx, "Length mismatch: header says %d, actual is %d, message not forwarded", dataLen, len(*msg)-5)
 		return 0, 0, nil, false
 	}
 
+	payload := (*msg)[5 : 5+dataLen]
 	return msgType, dataLen, payload, true
 }
 
