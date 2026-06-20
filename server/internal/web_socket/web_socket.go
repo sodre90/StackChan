@@ -116,6 +116,9 @@ func Handler(r *ghttp.Request) {
 				// reentrant). Releasing first also avoids holding the lock across a network write.
 				client.mu.Lock()
 				client.Conn = ws
+				// Re-assert pool membership under the lock so a racing disconnect cleanup
+				// (which deletes only while holding this lock) cannot evict the reconnected client.
+				stackChanClientPool.Store(mac, client)
 				callAppClient := client.CallAppClient
 				hasCameraSubs := len(client.CameraSubscriptionList) > 0
 				conn := client.Conn
@@ -158,6 +161,18 @@ func Handler(r *ghttp.Request) {
 		}
 		logger.Info(ctx, "There is a StackChen connected to the service.", client.Mac)
 		defer func() {
+			// Remove this StackChan from the pool when its read loop ends, but only
+			// while we hold client.mu and only if the pooled connection is still the one
+			// this goroutine owns. A reconnect reuses the same *StackChanClient and swaps
+			// in a new Conn (re-storing itself under the lock), so the old goroutine's
+			// cleanup must not evict the now-live client. Without this, disconnected
+			// StackChans leaked in the pool forever and still showed as "online".
+			client.mu.Lock()
+			if client.Conn == ws {
+				stackChanClientPool.Delete(mac)
+			}
+			client.mu.Unlock()
+			_ = ws.Close()
 			logger.Info(ctx, "There is a StackChan that has disconnected.", mac, deviceType)
 		}()
 		for {
