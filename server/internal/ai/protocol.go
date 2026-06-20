@@ -24,6 +24,8 @@ import (
 	"github.com/gogf/gf/v2/net/ghttp"
 	"github.com/gorilla/websocket"
 	"github.com/hraban/opus"
+
+	"stackChan/internal/auth"
 )
 
 const (
@@ -214,6 +216,14 @@ func Handler(r *ghttp.Request) {
 	}
 	if mac == "" {
 		r.Response.WriteStatus(http.StatusBadRequest, "Device-Id header or mac parameter is required")
+		return
+	}
+
+	// Require the shared bearer token before upgrading. The xiaozhi firmware
+	// sends it as "Authorization: Bearer <token>", provisioned via the OTA response.
+	if !auth.Validate(r.Request.Header.Get("Authorization")) {
+		logger.Warningf(ctx, "AI WS auth rejected: mac=%s remote=%s", mac, r.Request.RemoteAddr)
+		r.Response.WriteStatus(http.StatusUnauthorized, "unauthorized")
 		return
 	}
 
