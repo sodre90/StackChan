@@ -12,6 +12,7 @@ import (
 	"net/http"
 	"path/filepath"
 	"stackChan/internal/ai"
+	"stackChan/internal/auth"
 	"stackChan/internal/controller/dance"
 	"stackChan/internal/controller/device"
 	"stackChan/internal/controller/file"
@@ -79,6 +80,16 @@ var (
 				aiConfig = ai.DefaultConfig()
 			}
 			ai.Initialize(aiConfig)
+
+			// WebSocket authentication: require a shared bearer token on the AI WS
+			// and the relay's robot side. Fail closed — refuse to start with an
+			// empty token rather than silently exposing unauthenticated endpoints.
+			if aiConfig.WSAuthToken == "" {
+				return fmt.Errorf("ws_auth_token is not set in additional_config.yaml; " +
+					"refusing to start with unauthenticated WebSockets")
+			}
+			auth.SetToken(aiConfig.WSAuthToken)
+
 			s.BindHandler("/xiaozhi/ws", ai.Handler)
 			port := aiConfig.WSPort
 			if port == 0 {
@@ -115,6 +126,10 @@ var (
 					"websocket": map[string]interface{}{
 						"url":     wsUrl,
 						"version": 1,
+						// Shared bearer token the device echoes back on connect. The
+						// firmware persists every websocket string key to NVS, so this
+						// provisions both the AI WS and the relay robot side.
+						"token": aiConfig.WSAuthToken,
 					},
 					"server_time": map[string]interface{}{
 						"timestamp":        time.Now().Unix(),

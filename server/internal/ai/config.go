@@ -134,6 +134,12 @@ type Config struct {
 
 	// Quiet hours: suppress voice interaction and proactive announcements overnight.
 	QuietHours QuietHoursConfig `yaml:"quiet_hours" json:"quiet_hours"`
+
+	// WSAuthToken is the shared bearer token required on the AI WebSocket
+	// (/xiaozhi/ws) and the relay's robot side (deviceType=StackChan). The server
+	// hands it to the device via the OTA response and validates it from the
+	// Authorization header on connect. Empty means the server refuses to start.
+	WSAuthToken string `yaml:"ws_auth_token" json:"ws_auth_token"`
 }
 
 // DefaultConfig returns the default AI configuration for local Ollama setup
