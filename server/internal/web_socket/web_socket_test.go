@@ -125,3 +125,68 @@ func TestConcurrentCameraSubscription(t *testing.T) {
 	close(stop)
 	wg.Wait()
 }
+
+// TestConcurrentCallState exercises the App-side call/phone-screen paths against
+// the device-side call handler. It covers CallAppClient and phoneScreen, which
+// the App-side HangupCall/Jpeg cases touched without holding the lock (and where
+// HangupCall additionally forwarded while holding the lock — a self-deadlock).
+// Must complete and be -race clean.
+func TestConcurrentCallState(t *testing.T) {
+	ctx := context.Background()
+	mac := "RACEMAC00002"
+	sc := &StackChanClient{Mac: mac, mu: &sync.RWMutex{}}
+	stackChanClientPool.Store(mac, sc)
+	defer stackChanClientPool.Delete(mac)
+
+	bin := websocket.BinaryMessage
+	var wg sync.WaitGroup
+	stop := make(chan struct{})
+
+	// Device side: accept then refuse calls (reads/writes CallAppClient + list).
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		agree := createMessage(AgreeCall, nil)
+		refuse := createMessage(RefuseCall, nil)
+		for {
+			select {
+			case <-stop:
+				return
+			default:
+				readStackChanMessage(ctx, sc, &bin, agree)
+				readStackChanMessage(ctx, sc, &bin, refuse)
+			}
+		}
+	}()
+
+	// App side: request/hang up calls and toggle the phone screen while pushing a
+	// phone-screen JPEG (whose handler reads stackChanClient.phoneScreen).
+	for i := 0; i < 4; i++ {
+		ac := &AppClient{Mac: mac, mu: &sync.RWMutex{}, DeviceId: fmt.Sprintf("c%d", i)}
+		wg.Add(1)
+		go func(ac *AppClient) {
+			defer wg.Done()
+			req := createMessage(RequestCall, []byte(mac))
+			hang := createMessage(HangupCall, nil)
+			onPS := createMessage(OnPhoneScreen, []byte(mac))
+			offPS := createMessage(OffPhoneScreen, []byte(mac))
+			jpeg := createMessage(Jpeg, append([]byte(mac), 'x'))
+			for {
+				select {
+				case <-stop:
+					return
+				default:
+					readAppClientMessage(ctx, ac, &bin, req)
+					readAppClientMessage(ctx, ac, &bin, onPS)
+					readAppClientMessage(ctx, ac, &bin, jpeg)
+					readAppClientMessage(ctx, ac, &bin, offPS)
+					readAppClientMessage(ctx, ac, &bin, hang)
+				}
+			}
+		}(ac)
+	}
+
+	time.Sleep(150 * time.Millisecond)
+	close(stop)
+	wg.Wait()
+}

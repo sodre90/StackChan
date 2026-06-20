@@ -597,7 +597,10 @@ func readAppClientMessage(ctx context.Context, client *AppClient, messageType *i
 			newMsg := createMessage(msgType, data)
 			stackChanClient := getStackChanClient(macAddr)
 			if stackChanClient != nil {
-				if stackChanClient.phoneScreen {
+				stackChanClient.mu.RLock()
+				showPhone := stackChanClient.phoneScreen
+				stackChanClient.mu.RUnlock()
+				if showPhone {
 					forwardMessage(ctx, stackChanClient.Conn, messageType, newMsg, stackChanClient.mu)
 				}
 			}
@@ -664,28 +667,34 @@ func readAppClientMessage(ctx context.Context, client *AppClient, messageType *i
 		case HangupCall:
 			stackChanClientPool.Range(func(_, value any) bool {
 				stackChanClient := value.(*StackChanClient)
-				if stackChanClient.CallAppClient == client {
-					// Found corresponding call
-					stackChanClient.mu.Lock()
-					stackChanClient.CallAppClient = nil
-					forwardMessage(ctx, stackChanClient.Conn, messageType, msg, stackChanClient.mu)
-
-					newList := stackChanClient.CameraSubscriptionList[:0]
-					for _, sub := range stackChanClient.CameraSubscriptionList {
-						if sub != client {
-							newList = append(newList, sub)
-						}
-					}
-					stackChanClient.CameraSubscriptionList = newList
+				stackChanClient.mu.Lock()
+				if stackChanClient.CallAppClient != client {
 					stackChanClient.mu.Unlock()
-					if len(stackChanClient.CameraSubscriptionList) == 0 {
-						offMsg := createMessage(OffCamera, nil)
-						offType := websocket.BinaryMessage
-						forwardMessage(ctx, stackChanClient.Conn, &offType, offMsg, stackChanClient.mu)
-					}
-					return false
+					return true
 				}
-				return true
+				// Found the call: clear it and drop this app from the subscription
+				// list under the lock, then forward after unlocking (forwardMessage
+				// re-locks, so forwarding under the lock would self-deadlock).
+				stackChanClient.CallAppClient = nil
+				newList := stackChanClient.CameraSubscriptionList[:0]
+				for _, sub := range stackChanClient.CameraSubscriptionList {
+					if sub != client {
+						newList = append(newList, sub)
+					}
+				}
+				stackChanClient.CameraSubscriptionList = newList
+				nowEmpty := len(newList) == 0
+				conn := stackChanClient.Conn
+				mu := stackChanClient.mu
+				stackChanClient.mu.Unlock()
+
+				forwardMessage(ctx, conn, messageType, msg, mu)
+				if nowEmpty {
+					offMsg := createMessage(OffCamera, nil)
+					offType := websocket.BinaryMessage
+					forwardMessage(ctx, conn, &offType, offMsg, mu)
+				}
+				return false
 			})
 			break
 		case OnCamera:
