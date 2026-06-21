@@ -1900,6 +1900,42 @@ func SpeakToDeviceWithVoice(ctx context.Context, targetMac, text, voice string) 
 // talking. Returns the number of devices targeted. Runs the reply on each
 // client's connection context (not the caller's) so it survives the HTTP
 // request returning and is cancelled if the device disconnects.
+// AskLLM runs the full LLM pipeline — including the MCP tool-calling loop — for a
+// single prompt and returns the model's text answer. Unlike ChatToDevice it speaks
+// to NO device and runs NO TTS: it builds a throwaway in-memory session, calls the
+// LLM, and returns the text (emojis stripped, matching the spoken path). Used by the
+// /xiaozhi/test/ask endpoint to exercise the LLM and tools from curl without a robot.
+//
+// mac only tags the session and the tool-invocation context; pass "" if you don't
+// care. The throwaway client has no WebSocket connection, so a query that makes the
+// model call a device-control tool (robot.*) cannot reach a device — keep test
+// prompts to informational tools (weather, time, search, etc.).
+func AskLLM(ctx context.Context, mac, text string) string {
+	text = strings.TrimSpace(text)
+	if text == "" {
+		return ""
+	}
+	if mac == "" {
+		mac = "test-ask"
+	}
+
+	// Give the tool-calling loop room: each LLM call carries its own 60s client
+	// timeout and the loop may run several iterations before producing an answer.
+	callCtx, cancel := context.WithTimeout(ctx, 120*time.Second)
+	defer cancel()
+
+	client := &AIClient{
+		Mac:       mac,
+		mu:        &sync.RWMutex{},
+		SessionID: "test-ask",
+		ctx:       callCtx,
+		LastTime:  time.Now(),
+	}
+	addMessageToContext(callCtx, client, "user", text)
+
+	return stripEmojis(callLLM(callCtx, client))
+}
+
 func ChatToDevice(targetMac, text string) int {
 	text = strings.TrimSpace(text)
 	if text == "" {

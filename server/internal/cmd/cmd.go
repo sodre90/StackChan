@@ -191,6 +191,29 @@ var (
 				})
 			})
 
+			// Test endpoint: run the full LLM -> tool-calling loop for one prompt
+			// and RETURN the answer as JSON. Unlike /test/chat, this speaks to NO
+			// device and runs NO TTS — the robot stays silent and you get the
+			// model's text reply (with any tool calls already resolved) straight
+			// back in the HTTP response. No device needs to be connected.
+			//   GET/POST /xiaozhi/test/ask?text=...&mac=...
+			// text required; mac optional (only tags the throwaway session/tool ctx).
+			s.BindHandler("/xiaozhi/test/ask", func(r *ghttp.Request) {
+				text := r.Get("text").String()
+				if text == "" {
+					r.Response.WriteStatus(http.StatusBadRequest)
+					r.Response.WriteJson(g.Map{"error": "text parameter is required"})
+					return
+				}
+				mac := r.Get("mac").String()
+				answer := ai.AskLLM(r.Context(), mac, text)
+				r.Response.WriteJson(g.Map{
+					"text":   text,
+					"answer": answer,
+					"mac":    mac,
+				})
+			})
+
 			// Test endpoint: list currently connected AI device MACs.
 			s.BindHandler("/xiaozhi/test/devices", func(r *ghttp.Request) {
 				macs := ai.GetActiveClients()
