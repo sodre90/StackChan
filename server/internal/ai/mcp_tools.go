@@ -189,11 +189,11 @@ func NewMCPManager(cfg Config) *MCPManager {
 
 	m.RegisterTool(MCPTool{
 		Name:        "get_weather",
-		Description: "Get current weather conditions and 3-day forecast for a location. Always call this for any weather or temperature question — never answer from memory.",
+		Description: "Get the current weather and a 3-day forecast for any city in the world, from live data. ALWAYS call this for any question about weather, temperature, rain, wind, or what to wear — NEVER answer from memory or guess, because your training data has no live weather. The 'location' parameter is REQUIRED and must be a real city or place name. If the user asks about the weather without naming a place, do NOT invent or assume a city (e.g. do not default to Budapest): first ask them which city in one short question, then call this tool with their answer.",
 		Parameters: map[string]interface{}{
 			"type": "object",
 			"properties": map[string]interface{}{
-				"location": map[string]interface{}{"type": "string", "description": "City name or location (e.g. Budapest, London, New York)"},
+				"location": map[string]interface{}{"type": "string", "description": "Required. The city or place to get weather for, e.g. Budapest, London, New York. Must come from the user — never guessed."},
 			},
 			"required": []string{"location"},
 		},
@@ -202,7 +202,7 @@ func NewMCPManager(cfg Config) *MCPManager {
 
 	m.RegisterTool(MCPTool{
 		Name:        "get_current_datetime",
-		Description: "Get the current date and time. Use this when the user asks what time or date it is.",
+		Description: "Get the current date, time, and day of the week (server local time). ALWAYS call this for any question about the current time, today's date, what day it is, or for date math like 'what is the date next Friday' — NEVER answer from memory, because you do not know the current date or time otherwise. Takes no parameters.",
 		Parameters: map[string]interface{}{
 			"type":       "object",
 			"properties": map[string]interface{}{},
@@ -212,11 +212,11 @@ func NewMCPManager(cfg Config) *MCPManager {
 
 	m.RegisterTool(MCPTool{
 		Name:        "get_price",
-		Description: "Get the current price and 24-hour change for a cryptocurrency or stock. Examples: 'bitcoin', 'ethereum', 'BTC', 'AAPL', 'TSLA'. Always call this for any price or market question.",
+		Description: "Get the current price and 24-hour change for a cryptocurrency or stock, from live market data. ALWAYS call this for any price, exchange-rate, or market question — NEVER answer from memory, because prices change constantly. The 'asset' parameter is REQUIRED. If the user asks about a price without naming the asset, ask which one first instead of guessing.",
 		Parameters: map[string]interface{}{
 			"type": "object",
 			"properties": map[string]interface{}{
-				"asset": map[string]interface{}{"type": "string", "description": "Crypto name/symbol (e.g. bitcoin, BTC, ethereum) or stock ticker (e.g. AAPL, TSLA)"},
+				"asset": map[string]interface{}{"type": "string", "description": "Required. A crypto name/symbol (e.g. bitcoin, BTC, ethereum) or a stock ticker (e.g. AAPL, TSLA)."},
 			},
 			"required": []string{"asset"},
 		},
@@ -225,11 +225,11 @@ func NewMCPManager(cfg Config) *MCPManager {
 
 	m.RegisterTool(MCPTool{
 		Name:        "web_search",
-		Description: "Search the internet for current news, recent events, or any information that might be outdated in training data. Use this whenever the user asks about something that may have changed recently.",
+		Description: "Search the live internet (Brave/DuckDuckGo) for current news, recent events, facts, opening hours, sports results, or anything that may have changed since your training or that you are not certain about. ALWAYS prefer calling this over guessing when the user asks about real-world facts or recent information. The 'query' parameter is REQUIRED; turn the user's request into a concise, focused search query (you may translate it to English or keep the user's language, whichever searches best).",
 		Parameters: map[string]interface{}{
 			"type": "object",
 			"properties": map[string]interface{}{
-				"query": map[string]interface{}{"type": "string", "description": "The search query"},
+				"query": map[string]interface{}{"type": "string", "description": "Required. A concise search query capturing what the user wants to find."},
 			},
 			"required": []string{"query"},
 		},
