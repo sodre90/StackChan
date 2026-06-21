@@ -825,6 +825,9 @@ func streamLLMSentences(ctx context.Context, client *AIClient) string {
 		"max_tokens":  512,
 		"stream":      true,
 	}
+	if len(aiConfig.LLMChatTemplateKwargs) > 0 {
+		requestBody["chat_template_kwargs"] = aiConfig.LLMChatTemplateKwargs
+	}
 	bodyBytes, err := json.Marshal(requestBody)
 	if err != nil {
 		logger.Errorf(ctx, "Failed to marshal LLM request: %v", err)
@@ -1201,6 +1204,9 @@ func callLLM(ctx context.Context, client *AIClient) string {
 		"max_tokens":  512,
 		"stream":      aiConfig.StreamLLM,
 	}
+	if len(aiConfig.LLMChatTemplateKwargs) > 0 {
+		requestBody["chat_template_kwargs"] = aiConfig.LLMChatTemplateKwargs
+	}
 
 	bodyBytes, err := json.Marshal(requestBody)
 	if err != nil {
@@ -1260,6 +1266,9 @@ func callLLMWithTools(ctx context.Context, client *AIClient) string {
 			"stream":      false,
 			"tools":       tools,
 			"tool_choice": "auto",
+		}
+		if len(aiConfig.LLMChatTemplateKwargs) > 0 {
+			requestBody["chat_template_kwargs"] = aiConfig.LLMChatTemplateKwargs
 		}
 
 		bodyBytes, err := json.Marshal(requestBody)

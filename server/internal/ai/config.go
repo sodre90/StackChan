@@ -140,6 +140,14 @@ type Config struct {
 	// hands it to the device via the OTA response and validates it from the
 	// Authorization header on connect. Empty means the server refuses to start.
 	WSAuthToken string `yaml:"ws_auth_token" json:"ws_auth_token"`
+
+	// LLMChatTemplateKwargs is passed through verbatim as the OpenAI
+	// chat_template_kwargs field on every /chat/completions request. It lets a
+	// deployment toggle per-request template options without changing the
+	// llama.cpp server's global flags — e.g. {enable_thinking: false} to disable
+	// Qwen3 reasoning for StackChan while leaving it on for other apps. Empty/unset
+	// means the field is omitted entirely.
+	LLMChatTemplateKwargs map[string]interface{} `yaml:"llm_chat_template_kwargs" json:"llm_chat_template_kwargs"`
 }
 
 // DefaultConfig returns the default AI configuration for local Ollama setup
