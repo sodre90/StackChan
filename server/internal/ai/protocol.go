@@ -133,7 +133,16 @@ type AIClient struct {
 	// configured default; the /xiaozhi/test/ask endpoint sets it to toggle Qwen3
 	// reasoning (enable_thinking) per call.
 	chatTemplateKwargs map[string]interface{}
+
+	// temperature, when non-nil, overrides the default LLM sampling temperature for
+	// this client's requests. Real device clients leave it nil (default 0.7); the
+	// /xiaozhi/test/ask endpoint sets it to sweep temperature per call.
+	temperature *float64
 }
+
+// defaultLLMTemperature is the sampling temperature used when a client has no
+// per-call override.
+const defaultLLMTemperature = 0.7
 
 // effectiveChatTemplateKwargs returns the chat_template_kwargs to send on this
 // client's LLM requests: the per-client override when set, otherwise the global
@@ -143,6 +152,15 @@ func (c *AIClient) effectiveChatTemplateKwargs() map[string]interface{} {
 		return c.chatTemplateKwargs
 	}
 	return aiConfig.LLMChatTemplateKwargs
+}
+
+// effectiveTemperature returns the sampling temperature for this client's LLM
+// requests: the per-client override when set, otherwise defaultLLMTemperature.
+func (c *AIClient) effectiveTemperature() float64 {
+	if c != nil && c.temperature != nil {
+		return *c.temperature
+	}
+	return defaultLLMTemperature
 }
 
 // XiaoZhiHelloMessage is the hello message from the device
@@ -837,7 +855,7 @@ func streamLLMSentences(ctx context.Context, client *AIClient) string {
 	requestBody := map[string]interface{}{
 		"model":       aiConfig.LLMModel,
 		"messages":    messages,
-		"temperature": 0.7,
+		"temperature": client.effectiveTemperature(),
 		"max_tokens":  512,
 		"stream":      true,
 	}
@@ -1216,7 +1234,7 @@ func callLLM(ctx context.Context, client *AIClient) string {
 	requestBody := map[string]interface{}{
 		"model":       aiConfig.LLMModel,
 		"messages":    messages,
-		"temperature": 0.7,
+		"temperature": client.effectiveTemperature(),
 		"max_tokens":  512,
 		"stream":      aiConfig.StreamLLM,
 	}
@@ -1277,7 +1295,7 @@ func callLLMWithTools(ctx context.Context, client *AIClient) string {
 		requestBody := map[string]interface{}{
 			"model":       aiConfig.LLMModel,
 			"messages":    messages,
-			"temperature": 0.7,
+			"temperature": client.effectiveTemperature(),
 			"max_tokens":  512,
 			"stream":      false,
 			"tools":       tools,
@@ -1930,7 +1948,10 @@ func SpeakToDeviceWithVoice(ctx context.Context, targetMac, text, voice string) 
 // reasoning overrides Qwen3's enable_thinking for this call only: nil uses the
 // configured default, &true forces reasoning on, &false forces it off. The override
 // is layered over any other configured chat_template_kwargs.
-func AskLLM(ctx context.Context, mac, text string, reasoning *bool) string {
+//
+// temperature overrides the LLM sampling temperature for this call only: nil uses
+// the default (0.7), otherwise the given value is sent verbatim.
+func AskLLM(ctx context.Context, mac, text string, reasoning *bool, temperature *float64) string {
 	text = strings.TrimSpace(text)
 	if text == "" {
 		return ""
@@ -1945,11 +1966,12 @@ func AskLLM(ctx context.Context, mac, text string, reasoning *bool) string {
 	defer cancel()
 
 	client := &AIClient{
-		Mac:       mac,
-		mu:        &sync.RWMutex{},
-		SessionID: "test-ask",
-		ctx:       callCtx,
-		LastTime:  time.Now(),
+		Mac:         mac,
+		mu:          &sync.RWMutex{},
+		SessionID:   "test-ask",
+		ctx:         callCtx,
+		LastTime:    time.Now(),
+		temperature: temperature,
 	}
 
 	// Per-call reasoning override: copy the configured kwargs and set

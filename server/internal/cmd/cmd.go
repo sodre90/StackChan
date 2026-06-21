@@ -196,10 +196,11 @@ var (
 			// device and runs NO TTS — the robot stays silent and you get the
 			// model's text reply (with any tool calls already resolved) straight
 			// back in the HTTP response. No device needs to be connected.
-			//   GET/POST /xiaozhi/test/ask?text=...&mac=...&reasoning=true|false
+			//   GET/POST /xiaozhi/test/ask?text=...&mac=...&reasoning=true|false&temperature=0.7
 			// text required; mac optional (only tags the throwaway session/tool ctx);
 			// reasoning optional (omit = configured default) toggles Qwen3 thinking
-			// for this call only.
+			// for this call only; temperature optional (omit = default 0.7) sets the
+			// LLM sampling temperature for this call only.
 			s.BindHandler("/xiaozhi/test/ask", func(r *ghttp.Request) {
 				text := r.Get("text").String()
 				if text == "" {
@@ -215,12 +216,20 @@ var (
 					b := r.Get("reasoning").Bool()
 					reasoning = &b
 				}
-				answer := ai.AskLLM(r.Context(), mac, text, reasoning)
+				// temperature override: absent -> nil (use default 0.7); present ->
+				// parse as float and send verbatim.
+				var temperature *float64
+				if raw := r.Get("temperature").String(); raw != "" {
+					f := r.Get("temperature").Float64()
+					temperature = &f
+				}
+				answer := ai.AskLLM(r.Context(), mac, text, reasoning, temperature)
 				r.Response.WriteJson(g.Map{
-					"text":      text,
-					"answer":    answer,
-					"mac":       mac,
-					"reasoning": reasoning,
+					"text":        text,
+					"answer":      answer,
+					"mac":         mac,
+					"reasoning":   reasoning,
+					"temperature": temperature,
 				})
 			})
 
