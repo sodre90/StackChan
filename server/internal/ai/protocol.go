@@ -127,6 +127,22 @@ type AIClient struct {
 	// Conversation context
 	messages      []map[string]interface{}
 	contextMu     sync.RWMutex
+
+	// chatTemplateKwargs, when non-nil, overrides aiConfig.LLMChatTemplateKwargs
+	// for this client's LLM requests. Real device clients leave it nil and use the
+	// configured default; the /xiaozhi/test/ask endpoint sets it to toggle Qwen3
+	// reasoning (enable_thinking) per call.
+	chatTemplateKwargs map[string]interface{}
+}
+
+// effectiveChatTemplateKwargs returns the chat_template_kwargs to send on this
+// client's LLM requests: the per-client override when set, otherwise the global
+// configured value.
+func (c *AIClient) effectiveChatTemplateKwargs() map[string]interface{} {
+	if c != nil && c.chatTemplateKwargs != nil {
+		return c.chatTemplateKwargs
+	}
+	return aiConfig.LLMChatTemplateKwargs
 }
 
 // XiaoZhiHelloMessage is the hello message from the device
@@ -825,8 +841,8 @@ func streamLLMSentences(ctx context.Context, client *AIClient) string {
 		"max_tokens":  512,
 		"stream":      true,
 	}
-	if len(aiConfig.LLMChatTemplateKwargs) > 0 {
-		requestBody["chat_template_kwargs"] = aiConfig.LLMChatTemplateKwargs
+	if kw := client.effectiveChatTemplateKwargs(); len(kw) > 0 {
+		requestBody["chat_template_kwargs"] = kw
 	}
 	bodyBytes, err := json.Marshal(requestBody)
 	if err != nil {
@@ -1204,8 +1220,8 @@ func callLLM(ctx context.Context, client *AIClient) string {
 		"max_tokens":  512,
 		"stream":      aiConfig.StreamLLM,
 	}
-	if len(aiConfig.LLMChatTemplateKwargs) > 0 {
-		requestBody["chat_template_kwargs"] = aiConfig.LLMChatTemplateKwargs
+	if kw := client.effectiveChatTemplateKwargs(); len(kw) > 0 {
+		requestBody["chat_template_kwargs"] = kw
 	}
 
 	bodyBytes, err := json.Marshal(requestBody)
@@ -1267,8 +1283,8 @@ func callLLMWithTools(ctx context.Context, client *AIClient) string {
 			"tools":       tools,
 			"tool_choice": "auto",
 		}
-		if len(aiConfig.LLMChatTemplateKwargs) > 0 {
-			requestBody["chat_template_kwargs"] = aiConfig.LLMChatTemplateKwargs
+		if kw := client.effectiveChatTemplateKwargs(); len(kw) > 0 {
+			requestBody["chat_template_kwargs"] = kw
 		}
 
 		bodyBytes, err := json.Marshal(requestBody)
@@ -1910,7 +1926,11 @@ func SpeakToDeviceWithVoice(ctx context.Context, targetMac, text, voice string) 
 // care. The throwaway client has no WebSocket connection, so a query that makes the
 // model call a device-control tool (robot.*) cannot reach a device — keep test
 // prompts to informational tools (weather, time, search, etc.).
-func AskLLM(ctx context.Context, mac, text string) string {
+//
+// reasoning overrides Qwen3's enable_thinking for this call only: nil uses the
+// configured default, &true forces reasoning on, &false forces it off. The override
+// is layered over any other configured chat_template_kwargs.
+func AskLLM(ctx context.Context, mac, text string, reasoning *bool) string {
 	text = strings.TrimSpace(text)
 	if text == "" {
 		return ""
@@ -1931,6 +1951,18 @@ func AskLLM(ctx context.Context, mac, text string) string {
 		ctx:       callCtx,
 		LastTime:  time.Now(),
 	}
+
+	// Per-call reasoning override: copy the configured kwargs and set
+	// enable_thinking so any other configured template options are preserved.
+	if reasoning != nil {
+		kw := make(map[string]interface{}, len(aiConfig.LLMChatTemplateKwargs)+1)
+		for k, v := range aiConfig.LLMChatTemplateKwargs {
+			kw[k] = v
+		}
+		kw["enable_thinking"] = *reasoning
+		client.chatTemplateKwargs = kw
+	}
+
 	addMessageToContext(callCtx, client, "user", text)
 
 	return stripEmojis(callLLM(callCtx, client))

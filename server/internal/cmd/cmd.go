@@ -196,8 +196,10 @@ var (
 			// device and runs NO TTS — the robot stays silent and you get the
 			// model's text reply (with any tool calls already resolved) straight
 			// back in the HTTP response. No device needs to be connected.
-			//   GET/POST /xiaozhi/test/ask?text=...&mac=...
-			// text required; mac optional (only tags the throwaway session/tool ctx).
+			//   GET/POST /xiaozhi/test/ask?text=...&mac=...&reasoning=true|false
+			// text required; mac optional (only tags the throwaway session/tool ctx);
+			// reasoning optional (omit = configured default) toggles Qwen3 thinking
+			// for this call only.
 			s.BindHandler("/xiaozhi/test/ask", func(r *ghttp.Request) {
 				text := r.Get("text").String()
 				if text == "" {
@@ -206,11 +208,19 @@ var (
 					return
 				}
 				mac := r.Get("mac").String()
-				answer := ai.AskLLM(r.Context(), mac, text)
+				// reasoning override: absent -> nil (use config default); present ->
+				// parse as bool (true/1/yes/on => on, false/0/no/off => off).
+				var reasoning *bool
+				if raw := r.Get("reasoning").String(); raw != "" {
+					b := r.Get("reasoning").Bool()
+					reasoning = &b
+				}
+				answer := ai.AskLLM(r.Context(), mac, text, reasoning)
 				r.Response.WriteJson(g.Map{
-					"text":   text,
-					"answer": answer,
-					"mac":    mac,
+					"text":      text,
+					"answer":    answer,
+					"mac":       mac,
+					"reasoning": reasoning,
 				})
 			})
 
